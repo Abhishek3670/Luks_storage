@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}User Management{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-md-row">
+    <!-- Sidebar -->
+    <div class="sidebar border-end bg-light p-3" style="min-width: 280px;">
+        <h5 class="mb-3">Admin Menu</h5>
+        <ul class="nav nav-pills flex-column">
+            <li class="nav-item">
+              <a href="/" class="nav-link">
+                <i class="bi bi-speedometer2 me-2"></i>Dashboard
+              </a>
+            </li>
+            <li class="nav-item">
+              <a href="/admin/users" class="nav-link active" aria-current="page">
+                <i class="bi bi-people me-2"></i>Users
+              </a>
+            </li>
+          </ul>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content flex-grow-1 p-3">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="h4">User Accounts</h2>
+            <div>
+                <a href="/admin/users/add" class="btn btn-primary"><i class="bi bi-person-plus"></i> Add User</a>
+            </div>
+        </div>
+        
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Username</th>
+                                <th>Role</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for user in users %}
+                            <tr>
+                                <td>{{ user.id }}</td>
+                                <td>{{ user.username }}</td>
+                                <td><span class="badge bg-secondary">{{ user.role | capitalize }}</span></td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary" disabled>Edit</button>
+                                    <!-- Enable delete button, but not for the current user -->
+                                    {% if user.id != current_user_id %}
+                                    <form action="/admin/users/delete" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this user?');">
+                                        <input type="hidden" name="user_id" value="{{ user.id }}">
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+                                    </form>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

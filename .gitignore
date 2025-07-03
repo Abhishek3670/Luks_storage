@@ -1,0 +1,11 @@
+# Ignore the compiled output directory
+/target
+
+# Ignore the database file
+*.db
+*.db-journal
+
+# Ignore environment files
+.env*
+
+target/

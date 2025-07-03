@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}Add New User{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-md-row">
+    <!-- Sidebar -->
+    <div class="sidebar border-end bg-light p-3" style="min-width: 280px;">
+        <h5 class="mb-3">Admin Menu</h5>
+        <ul class="nav nav-pills flex-column">
+            <li class="nav-item"><a href="/" class="nav-link"><i class="bi bi-speedometer2 me-2"></i>Dashboard</a></li>
+            <li class="nav-item"><a href="/admin/users" class="nav-link active" aria-current="page"><i class="bi bi-people me-2"></i>Users</a></li>
+        </ul>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content flex-grow-1 p-3">
+        <h2 class="h4 mb-3">Add New User</h2>
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <form action="/admin/users/add" method="POST">
+                    <div class="mb-3">
+                        <label for="username" class="form-label">Username</label>
+                        <input type="text" class="form-control" id="username" name="username" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="password" class="form-label">Password</label>
+                        <input type="password" class="form-control" id="password" name="password" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="role" class="form-label">Role</label>
+                        <select class="form-select" id="role" name="role">
+                            <option value="viewer" selected>Viewer</option>
+                            <option value="editor">Editor</option>
+                            <option value="admin">Admin</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-success">Create User</button>
+                    <a href="/admin/users" class="btn btn-secondary">Cancel</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

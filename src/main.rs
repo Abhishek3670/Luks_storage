@@ -1,0 +1,491 @@
+use actix_web::{web, App, HttpResponse, HttpServer, Responder, http::header, Error};
+use actix_session::{Session, SessionMiddleware, storage::CookieSessionStore};
+use actix_web_flash_messages::{FlashMessage, IncomingFlashMessages, FlashMessagesFramework};
+use std::sync::{Arc, Mutex};
+use std::process::Stdio;
+use std::path::{Path, PathBuf};
+use serde::{Deserialize, Serialize};
+use tera::{Tera, Context};
+use rand::{Rng, thread_rng};
+use rand::distributions::Alphanumeric;
+use tokio::process::Command;
+use tokio::fs::{self, File};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use mime_guess::from_path;
+use std::os::unix::fs::MetadataExt;
+use sqlx::{SqlitePool, FromRow};
+use argon2::{
+    password_hash::{rand_core, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2
+};
+
+// --- 1. Configuration & State ---
+#[derive(Clone, Serialize)]
+struct Config {
+    device_path: String,
+    mapper_name: String,
+    mount_point: String,
+}
+
+impl Config {
+    fn from_env() -> Self {
+        Self {
+            device_path: std::env::var("LUKS_DEVICE_PATH").unwrap_or_else(|_| "/dev/sdb1".to_string()),
+            mapper_name: std::env::var("LUKS_MAPPER_NAME").unwrap_or_else(|_| "encrypted_volume".to_string()),
+            mount_point: std::env::var("LUKS_MOUNT_POINT").unwrap_or_else(|_| "/mnt/secure_data".to_string()),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct AppState {
+    is_mounted: Arc<Mutex<bool>>,
+    config: Config,
+    db: SqlitePool,
+    tera: Tera,
+}
+
+// --- 2. User & Request Models ---
+#[derive(Deserialize)]
+struct LoginRequest {
+    username: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
+struct UnlockRequest {
+    luks_password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+struct User {
+    id: i64,
+    username: String,
+    #[serde(skip)]
+    password_hash: String,
+    role: String,
+}
+
+#[derive(Serialize)]
+struct FileEntry {
+    name: String,
+    is_dir: bool,
+    size: u64,
+    relative_path: String,
+}
+
+#[derive(Deserialize)]
+struct DashboardQuery {
+    path: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreateFolderRequest {
+    current_path: String,
+    folder_name: String,
+}
+
+#[derive(Deserialize)]
+struct RenameRequest {
+    current_path: String,
+    old_name: String,
+    new_name: String,
+}
+
+#[derive(Deserialize)]
+struct DeleteRequest {
+    current_path: String,
+    item_name: String,
+}
+
+#[derive(Deserialize)]
+struct AddUserRequest {
+    username: String,
+    password: String,
+    role: String,
+}
+
+#[derive(Deserialize)]
+struct DeleteUserRequest {
+    user_id: i64,
+}
+
+
+// --- HELPER FUNCTIONS ---
+async fn check_if_mounted(mount_point: &str) -> bool {
+    let path = Path::new(mount_point);
+    if !path.is_dir() { return false; }
+    if path.canonicalize().unwrap_or_default() == Path::new("/").canonicalize().unwrap_or_default() { return true; }
+    let parent_path = match path.parent() { Some(p) => p, None => return false };
+    let path_meta = match fs::metadata(path).await { Ok(meta) => meta, Err(_) => return false };
+    let parent_meta = match fs::metadata(parent_path).await { Ok(meta) => meta, Err(_) => return false };
+    let is_mounted = path_meta.dev() != parent_meta.dev();
+    if is_mounted { log::info!("Verified that {} is an active mount point.", mount_point); }
+    else { log::info!("Path {} exists but is not a mount point.", mount_point); }
+    is_mounted
+}
+
+fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
+    let salt = SaltString::generate(&mut rand_core::OsRng);
+    let argon2 = Argon2::default();
+    let password_hash = argon2.hash_password(password.as_bytes(), &salt)?.to_string();
+    Ok(password_hash)
+}
+
+fn verify_password(hash: &str, password: &str) -> bool {
+    let parsed_hash = match argon2::PasswordHash::new(hash) {
+        Ok(h) => h,
+        Err(_) => return false,
+    };
+    Argon2::default().verify_password(password.as_bytes(), &parsed_hash).is_ok()
+}
+
+
+// --- 4. Route Handlers ---
+async fn show_dashboard(session: Session, app_state: web::Data<AppState>, flash_messages: IncomingFlashMessages, query: web::Query<DashboardQuery>) -> Result<HttpResponse, Error> {
+    let user = match session.get::<User>("user")? {
+        Some(user) => user,
+        None => { return Ok(HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish()); }
+    };
+
+    let mut context = Context::new();
+    context.insert("user", &user);
+    let is_mounted = *app_state.is_mounted.lock().unwrap();
+    context.insert("is_mounted", &is_mounted);
+    context.insert("config", &app_state.config);
+    let messages: Vec<FlashMessage> = flash_messages.iter().cloned().collect();
+    context.insert("messages", &messages);
+    let user_path = query.into_inner().path.unwrap_or_else(String::new);
+    context.insert("current_path", &user_path);
+
+    if is_mounted {
+        let base_path = PathBuf::from(&app_state.config.mount_point);
+        let mut current_abs_path = base_path.clone();
+        current_abs_path.push(&user_path);
+        if !current_abs_path.starts_with(&base_path) {
+            FlashMessage::error("Invalid path specified.").send();
+            return Ok(HttpResponse::Found().insert_header((header::LOCATION, "/")).finish());
+        }
+        let mut files: Vec<FileEntry> = Vec::new();
+        if let Ok(mut entries) = fs::read_dir(&current_abs_path).await {
+            while let Some(entry) = entries.next_entry().await? {
+                let metadata = entry.metadata().await?;
+                let name = entry.file_name().into_string().unwrap_or_default();
+                let relative_path = Path::new(&user_path).join(&name).to_string_lossy().to_string();
+                files.push(FileEntry { name, is_dir: metadata.is_dir(), size: metadata.len(), relative_path });
+            }
+        }
+        files.sort_by(|a, b| {
+            if a.is_dir == b.is_dir { a.name.to_lowercase().cmp(&b.name.to_lowercase()) }
+            else if a.is_dir { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater }
+        });
+        context.insert("files", &files);
+    }
+    
+    let rendered = app_state.tera.render("index.html", &context).unwrap();
+    Ok(HttpResponse::Ok().content_type("text/html").body(rendered))
+}
+
+async fn show_login_form(app_state: web::Data<AppState>) -> impl Responder {
+    HttpResponse::Ok().content_type("text/html").body(app_state.tera.render("login.html", &Context::new()).unwrap())
+}
+
+async fn show_admin_users(session: Session, app_state: web::Data<AppState>) -> impl Responder {
+    let user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
+    };
+
+    let users = sqlx::query_as::<_, User>("SELECT id, username, password_hash, role FROM users ORDER BY username")
+        .fetch_all(&app_state.db).await.unwrap_or_else(|_| vec![]);
+
+    let mut context = Context::new();
+    context.insert("users", &users);
+    context.insert("current_user_id", &user.id);
+    HttpResponse::Ok().content_type("text/html").body(app_state.tera.render("admin_users.html", &context).unwrap())
+}
+
+async fn show_add_user_form(app_state: web::Data<AppState>) -> impl Responder {
+    HttpResponse::Ok().content_type("text/html").body(app_state.tera.render("admin_user_form.html", &Context::new()).unwrap())
+}
+
+async fn add_user(form: web::Form<AddUserRequest>, app_state: web::Data<AppState>) -> impl Responder {
+    let hashed_password = match hash_password(&form.password) {
+        Ok(h) => h,
+        Err(_) => {
+            FlashMessage::error("Failed to process password.").send();
+            return HttpResponse::Found().insert_header((header::LOCATION, "/admin/users")).finish();
+        }
+    };
+
+    match sqlx::query("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)")
+        .bind(&form.username)
+        .bind(hashed_password)
+        .bind(&form.role)
+        .execute(&app_state.db)
+        .await
+    {
+        Ok(_) => FlashMessage::success(format!("User '{}' created successfully.", form.username)).send(),
+        Err(e) => FlashMessage::error(format!("Failed to create user: {}", e)).send(),
+    }
+    HttpResponse::Found().insert_header((header::LOCATION, "/admin/users")).finish()
+}
+
+async fn delete_user(session: Session, form: web::Form<DeleteUserRequest>, app_state: web::Data<AppState>) -> impl Responder {
+    let current_user = session.get::<User>("user").unwrap().unwrap();
+    if current_user.id == form.user_id {
+        FlashMessage::error("You cannot delete your own account.").send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/admin/users")).finish();
+    }
+
+    let user_to_delete = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?").bind(form.user_id).fetch_one(&app_state.db).await.unwrap();
+    if user_to_delete.role == "admin" {
+        let admin_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'").fetch_one(&app_state.db).await.unwrap_or(0);
+        if admin_count <= 1 {
+            FlashMessage::error("Cannot delete the last admin user.").send();
+            return HttpResponse::Found().insert_header((header::LOCATION, "/admin/users")).finish();
+        }
+    }
+
+    match sqlx::query("DELETE FROM users WHERE id = ?").bind(form.user_id).execute(&app_state.db).await {
+        Ok(_) => FlashMessage::success("User deleted successfully.").send(),
+        Err(e) => FlashMessage::error(format!("Failed to delete user: {}", e)).send(),
+    }
+    HttpResponse::Found().insert_header((header::LOCATION, "/admin/users")).finish()
+}
+
+
+async fn login(form: web::Form<LoginRequest>, session: Session, app_state: web::Data<AppState>) -> impl Responder {
+    let user = match sqlx::query_as::<_, User>("SELECT id, username, password_hash, role FROM users WHERE username = ?")
+        .bind(&form.username).fetch_optional(&app_state.db).await {
+            Ok(Some(user)) => user,
+            _ => {
+                FlashMessage::warning("Invalid credentials.").send();
+                return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish();
+            }
+        };
+
+    if verify_password(&user.password_hash, &form.password) {
+        session.insert("user", user).unwrap();
+        FlashMessage::info("Login successful!").send();
+        HttpResponse::Found().insert_header((header::LOCATION, "/")).finish()
+    } else {
+        FlashMessage::warning("Invalid credentials.").send();
+        HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish()
+    }
+}
+
+async fn logout(session: Session) -> impl Responder {
+    session.clear();
+    FlashMessage::info("You have been successfully logged out.").send();
+    HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish()
+}
+
+async fn unlock_drive(form: web::Form<UnlockRequest>, app_state: web::Data<AppState>) -> impl Responder {
+    let mut open_cmd = Command::new("sudo");
+    open_cmd.arg("cryptsetup").arg("luksOpen").arg(&app_state.config.device_path).arg(&app_state.config.mapper_name)
+        .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut child = open_cmd.spawn().expect("Failed to spawn cryptsetup command");
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        stdin.write_all(form.luks_password.as_bytes()).await.unwrap();
+    }
+    let output = child.wait_with_output().await.unwrap();
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        FlashMessage::error(format!("Failed to unlock device: {}", stderr)).send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
+    }
+
+    let mount_point = &app_state.config.mount_point;
+    if let Err(_) = tokio::fs::create_dir_all(mount_point).await {
+        FlashMessage::error("Server error: Could not create mount point directory.").send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
+    }
+    let mount_output = Command::new("sudo").arg("mount").arg(format!("/dev/mapper/{}", &app_state.config.mapper_name)).arg(mount_point).output().await.unwrap();
+    if !mount_output.status.success() {
+        let stderr = String::from_utf8_lossy(&mount_output.stderr);
+        let _ = Command::new("sudo").arg("cryptsetup").arg("luksClose").arg(&app_state.config.mapper_name).status().await;
+        FlashMessage::error(format!("Failed to mount device: {}", stderr)).send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
+    }
+    let user = std::env::var("USER").unwrap_or_else(|_| "root".to_string());
+    let chown_output = Command::new("sudo").arg("chown").arg("-R").arg(format!("{}:{}", user, user)).arg(mount_point).output().await.unwrap();
+    if !chown_output.status.success() {
+        let stderr = String::from_utf8_lossy(&chown_output.stderr);
+        log::error!("chown command failed: {}", stderr);
+    } else {
+        log::info!("Successfully changed ownership of {} to user {}", mount_point, user);
+    }
+    *app_state.is_mounted.lock().unwrap() = true;
+    FlashMessage::success("Device unlocked and mounted successfully!").send();
+    HttpResponse::Found().insert_header((header::LOCATION, "/")).finish()
+}
+
+async fn lock_drive(app_state: web::Data<AppState>) -> impl Responder {
+    let umount_output = Command::new("sudo").arg("umount").arg(&app_state.config.mount_point).output().await.unwrap();
+    if !umount_output.status.success() {
+        let stderr = String::from_utf8_lossy(&umount_output.stderr);
+        FlashMessage::error(format!("Failed to unmount device: {}", stderr)).send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
+    }
+    let close_output = Command::new("sudo").arg("cryptsetup").arg("luksClose").arg(&app_state.config.mapper_name).output().await.unwrap();
+    if !close_output.status.success() {
+        let stderr = String::from_utf8_lossy(&close_output.stderr);
+        FlashMessage::error(format!("Failed to lock device: {}", stderr)).send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
+    }
+    *app_state.is_mounted.lock().unwrap() = false;
+    FlashMessage::info("Device unmounted and locked successfully!").send();
+    HttpResponse::Found().insert_header((header::LOCATION, "/")).finish()
+}
+
+async fn preview_file(app_state: web::Data<AppState>, path: web::Path<String>) -> impl Responder {
+    let base_path = PathBuf::from(&app_state.config.mount_point);
+    let file_path = base_path.join(path.as_str());
+    if !file_path.starts_with(&base_path) { return HttpResponse::Forbidden().body("Access denied."); }
+    match fs::read(&file_path).await {
+        Ok(content) => {
+            let mime_type = from_path(&file_path).first_or_octet_stream();
+            HttpResponse::Ok().content_type(mime_type.as_ref()).body(content)
+        }
+        Err(e) => {
+            log::error!("Failed to read file for preview {:?}: {}", file_path, e);
+            HttpResponse::NotFound().body("File not found.")
+        }
+    }
+}
+
+async fn download_file(app_state: web::Data<AppState>, path: web::Path<String>) -> impl Responder {
+    let base_path = PathBuf::from(&app_state.config.mount_point);
+    let file_path = base_path.join(path.as_str());
+    if !file_path.starts_with(&base_path) { return HttpResponse::Forbidden().body("Access denied."); }
+    let filename = file_path.file_name().unwrap_or_default().to_string_lossy();
+    match fs::read(&file_path).await {
+        Ok(content) => {
+            HttpResponse::Ok().content_type("application/octet-stream")
+                .insert_header((header::CONTENT_DISPOSITION, format!("attachment; filename=\"{}\"", filename)))
+                .body(content)
+        }
+        Err(e) => {
+            log::error!("Failed to read file for download {:?}: {}", file_path, e);
+            HttpResponse::NotFound().body("File not found.")
+        }
+    }
+}
+
+async fn create_folder(app_state: web::Data<AppState>, form: web::Form<CreateFolderRequest>) -> impl Responder {
+    let base_path = PathBuf::from(&app_state.config.mount_point);
+    let current_path = base_path.join(&form.current_path);
+    if !current_path.starts_with(&base_path) {
+        FlashMessage::error("Invalid path.").send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
+    }
+    let new_folder_path = current_path.join(&form.folder_name);
+    match fs::create_dir(new_folder_path).await {
+        Ok(_) => FlashMessage::success("Folder created successfully.").send(),
+        Err(e) => FlashMessage::error(format!("Failed to create folder: {}", e)).send(),
+    }
+    HttpResponse::Found().insert_header((header::LOCATION, format!("/?path={}", form.current_path))).finish()
+}
+
+async fn rename_item(app_state: web::Data<AppState>, form: web::Form<RenameRequest>) -> impl Responder {
+    let base_path = PathBuf::from(&app_state.config.mount_point);
+    let current_path = base_path.join(&form.current_path);
+    if !current_path.starts_with(&base_path) {
+        FlashMessage::error("Invalid path.").send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
+    }
+    let old_path = current_path.join(&form.old_name);
+    let new_path = current_path.join(&form.new_name);
+    match fs::rename(old_path, new_path).await {
+        Ok(_) => FlashMessage::success("Item renamed successfully.").send(),
+        Err(e) => FlashMessage::error(format!("Failed to rename item: {}", e)).send(),
+    }
+    HttpResponse::Found().insert_header((header::LOCATION, format!("/?path={}", form.current_path))).finish()
+}
+
+async fn delete_item(app_state: web::Data<AppState>, form: web::Form<DeleteRequest>) -> impl Responder {
+    let base_path = PathBuf::from(&app_state.config.mount_point);
+    let current_path = base_path.join(&form.current_path);
+    if !current_path.starts_with(&base_path) {
+        FlashMessage::error("Invalid path.").send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
+    }
+    let item_path = current_path.join(&form.item_name);
+    let result = if item_path.is_dir() { fs::remove_dir_all(item_path).await } else { fs::remove_file(item_path).await };
+    match result {
+        Ok(_) => FlashMessage::success("Item deleted successfully.").send(),
+        Err(e) => FlashMessage::error(format!("Failed to delete item: {}", e)).send(),
+    }
+    HttpResponse::Found().insert_header((header::LOCATION, format!("/?path={}", form.current_path))).finish()
+}
+
+
+// --- 5. Main Function ---
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    std::env::set_var("RUST_LOG", "info");
+    env_logger::init();
+
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:luks_manager.db".to_string());
+    let db_pool = SqlitePool::connect(&database_url).await.expect("Failed to connect to database");
+    sqlx::migrate!("./migrations").run(&db_pool).await.expect("Failed to run database migrations");
+    
+    let user_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users").fetch_one(&db_pool).await.unwrap_or(0);
+    if user_count == 0 {
+        log::info!("No users found in database. Creating default admin user...");
+        let admin_pass = "password";
+        let hashed_password = hash_password(admin_pass).expect("Failed to hash password");
+        sqlx::query("INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)")
+            .bind("admin").bind(hashed_password).bind("admin").execute(&db_pool).await
+            .expect("Failed to create default admin user");
+        log::info!("Default admin user created with password: '{}'", admin_pass);
+    }
+
+    let config = Config::from_env();
+    let initial_mount_status = check_if_mounted(&config.mount_point).await;
+
+    let key: String = thread_rng().sample_iter(&Alphanumeric).take(64).map(char::from).collect();
+    let secret_key = actix_web::cookie::Key::from(key.as_bytes());
+
+    let tera = Tera::new("templates/**/*.html").expect("Failed to parse templates");
+
+    let app_state = AppState {
+        is_mounted: Arc::new(Mutex::new(initial_mount_status)),
+        config,
+        db: db_pool,
+        tera: tera,
+    };
+
+    log::info!("Starting server at http://127.0.0.1:8080");
+
+    HttpServer::new(move || {
+        let session_mw = SessionMiddleware::new(CookieSessionStore::default(), secret_key.clone());
+        App::new()
+            .app_data(web::Data::new(app_state.clone()))
+            .wrap(actix_web::middleware::Logger::default())
+            .wrap(session_mw)
+            .wrap(FlashMessagesFramework::builder(
+                actix_web_flash_messages::storage::CookieMessageStore::builder(secret_key.clone()).build()
+            ).build())
+            .route("/", web::get().to(show_dashboard))
+            .route("/login", web::get().to(show_login_form))
+            .route("/login", web::post().to(login))
+            .route("/logout", web::post().to(logout))
+            .route("/unlock", web::post().to(unlock_drive))
+            .route("/lock", web::post().to(lock_drive))
+            .route("/preview/{path:.*}", web::get().to(preview_file))
+            .route("/download/{path:.*}", web::get().to(download_file))
+            .route("/create_folder", web::post().to(create_folder))
+            .route("/rename", web::post().to(rename_item))
+            .route("/delete", web::post().to(delete_item))
+            .route("/admin/users", web::get().to(show_admin_users))
+            .route("/admin/users/add", web::get().to(show_add_user_form))
+            .route("/admin/users/add", web::post().to(add_user))
+            .route("/admin/users/delete", web::post().to(delete_user))
+    })
+    .bind(("127.0.0.1", 8080))?
+    .run()
+    .await
+}

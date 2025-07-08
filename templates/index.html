@@ -65,20 +65,14 @@
     <!-- Main Content -->
     <div class="main-content p-3">
         {% if is_mounted %}
-        <!-- Breadcrumb Navigation -->
+        <!-- Simple Breadcrumb Navigation -->
         <nav aria-label="breadcrumb">
             <ol class="breadcrumb">
                 <li class="breadcrumb-item">
                     <a href="/"><i class="bi bi-house"></i> Home</a>
                 </li>
                 {% if current_path %}
-                    {% for part in current_path.split('/') %}
-                        {% if loop.last %}
-                            <li class="breadcrumb-item active">{{ part }}</li>
-                        {% else %}
-                            <li class="breadcrumb-item"><a href="/?path={{ current_path.split('/')[:loop.index] | join('/') }}">{{ part }}</a></li>
-                        {% endif %}
-                    {% endfor %}
+                    <li class="breadcrumb-item active">{{ current_path }}</li>
                 {% endif %}
             </ol>
         </nav>
@@ -496,20 +490,40 @@ function toggleView() {
 }
 
 function deleteSelected() {
+    if (selectedFiles.size === 0) {
+        alert('No files selected');
+        return;
+    }
+    
     const currentPath = new URLSearchParams(window.location.search).get("path") || "";
-    if (confirm('Delete selected files?')) {
+    if (confirm(`Delete ${selectedFiles.size} selected file(s)?`)) {
         Promise.all(Array.from(selectedFiles).map(filePath => {
             return fetch('/delete_json', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ item_name: filePath, current_path: currentPath })
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    item_name: filePath.split('/').pop(),
+                    current_path: currentPath 
+                })
             });
         }))
-        .then(() => {
+        .then(responses => {
+            const failedDeletes = responses.filter(r => !r.ok);
+            if (failedDeletes.length > 0) {
+                alert(`Failed to delete ${failedDeletes.length} file(s)`);
+            } else {
+                alert('Files deleted successfully');
+            }
             clearSelection();
             location.reload();
         })
-        .catch(error => alert(`Error: ${error}`));
+        .catch(error => {
+            alert(`Error: ${error}`);
+            clearSelection();
+        });
     }
 }
 

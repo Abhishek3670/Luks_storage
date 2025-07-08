@@ -3,281 +3,516 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
-<div class="d-flex flex-column flex-md-row">
+<div class="d-flex flex-column flex-md-row h-100">
     <!-- Sidebar -->
-    <div class="sidebar border-end bg-light p-3" style="min-width: 280px;">
-        <h5 class="mb-3">Device Status</h5>
+    <div class="sidebar border-end bg-light p-3">
+        <h5 class="mb-3">
+            <i class="bi bi-hdd-stack"></i> Device Status
+        </h5>
+        
         <div class="card shadow-sm mb-4">
             <div class="card-body">
-                <ul class="list-group list-group-flush">
-                    <li class="list-group-item"><strong>Device:</strong> <code>{{ config.device_path }}</code></li>
-                    <li class="list-group-item"><strong>Mount Point:</strong> <code>{{ config.mount_point }}</code></li>
-                    <li class="list-group-item">
-                        <strong>Mounted:</strong>
-                        {% if is_mounted %}<span class="badge bg-success">Yes</span>{% else %}<span class="badge bg-danger">No</span>{% endif %}
-                    </li>
-                </ul>
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-device-hdd me-2"></i>
+                    <small class="text-muted">{{ config.device_path }}</small>
+                </div>
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-folder2-open me-2"></i>
+                    <small class="text-muted">{{ config.mount_point }}</small>
+                </div>
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-circle-fill me-2 {% if is_mounted %}text-success{% else %}text-danger{% endif %}"></i>
+                    <span class="badge {% if is_mounted %}bg-success{% else %}bg-danger{% endif %}">
+                        {% if is_mounted %}Mounted{% else %}Locked{% endif %}
+                    </span>
+                </div>
             </div>
         </div>
         
         {% if not is_mounted %}
             <div class="card shadow-sm">
-                <div class="card-header bg-success text-white"><h5 class="mb-0">Unlock Device</h5></div>
+                <div class="card-header bg-success text-white">
+                    <h6 class="mb-0"><i class="bi bi-unlock"></i> Unlock Device</h6>
+                </div>
                 <div class="card-body">
                     <form action="/unlock" method="POST">
                         <div class="mb-3">
-                            <label for="luks_password" class="form-label">LUKS Password</label>
-                            <input type="password" class="form-control" id="luks_password" name="luks_password" required>
+                            <input type="password" class="form-control" name="luks_password" 
+                                   placeholder="LUKS Password" required autocomplete="current-password">
                         </div>
-                        <button type="submit" class="btn btn-success w-100">Unlock & Mount</button>
+                        <button type="submit" class="btn btn-success w-100">
+                            <i class="bi bi-unlock-fill"></i> Unlock & Mount
+                        </button>
                     </form>
                 </div>
             </div>
         {% else %}
             <div class="card shadow-sm">
-                <div class="card-header bg-danger text-white"><h5 class="mb-0">Lock Device</h5></div>
+                <div class="card-header bg-danger text-white">
+                    <h6 class="mb-0"><i class="bi bi-lock"></i> Lock Device</h6>
+                </div>
                 <div class="card-body text-center">
-                    <form action="/lock" method="POST"><button type="submit" class="btn btn-danger w-100">Unmount & Lock</button></form>
+                    <form action="/lock" method="POST">
+                        <button type="submit" class="btn btn-danger w-100">
+                            <i class="bi bi-lock-fill"></i> Unmount & Lock
+                        </button>
+                    </form>
                 </div>
             </div>
         {% endif %}
     </div>
 
     <!-- Main Content -->
-    <div class="main-content flex-grow-1 p-3">
+    <div class="main-content p-3">
         {% if is_mounted %}
+        <!-- Simple Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item">
+                    <a href="/"><i class="bi bi-house"></i> Home</a>
+                </li>
+                {% if current_path %}
+                    <li class="breadcrumb-item active">{{ current_path }}</li>
+                {% endif %}
+            </ol>
+        </nav>
+
+        <!-- File Operations Toolbar -->
         <div class="d-flex justify-content-between align-items-center mb-3">
-            <h2 class="h4">File Browser</h2>
-            <div>
-                <button class="btn btn-primary me-2" data-bs-toggle="modal" data-bs-target="#createFolderModal"><i class="bi bi-folder-plus"></i> New Folder</button>
-                <div class="btn-group">
-                    <button id="listViewBtn" class="btn btn-outline-secondary active"><i class="bi bi-list-ul"></i></button>
-                    <button id="gridViewBtn" class="btn btn-outline-secondary"><i class="bi bi-grid-3x3-gap"></i></button>
+            <h4 class="mb-0">
+                <i class="bi bi-folder"></i> File Browser
+            </h4>
+            <div class="btn-group" role="group">
+                <button type="button" class="btn btn-outline-primary btn-sm" onclick="toggleView()">
+                    <i class="bi bi-grid-3x3-gap" id="viewIcon"></i>
+                </button>
+                <button type="button" class="btn btn-outline-success btn-sm" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                    <i class="bi bi-cloud-upload"></i> Upload
+                </button>
+                <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createFolderModal">
+                    <i class="bi bi-folder-plus"></i> New Folder
+                </button>
+            </div>
+        </div>
+
+        <!-- Multi-select Actions (hidden by default) -->
+        <div id="bulkActions" class="alert alert-info d-none">
+            <div class="d-flex justify-content-between align-items-center">
+                <span><span id="selectedCount">0</span> items selected</span>
+                <div>
+                    <button class="btn btn-primary btn-sm" onclick="downloadSelected()">
+                        <i class="bi bi-download"></i> Download
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteSelected()">
+                        <i class="bi bi-trash"></i> Delete
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="clearSelection()">
+                        <i class="bi bi-x"></i> Clear
+                    </button>
                 </div>
             </div>
         </div>
-        
-        <div class="card shadow-sm">
-            <div class="card-header">
-                <nav aria-label="breadcrumb">
-                    <ol class="breadcrumb mb-0">
-                        <li class="breadcrumb-item"><a href="/">Root</a></li>
-                        {% set path_segments = current_path | split(pat="/") %}{% set current_segment_path = "" %}
-                        {% for segment in path_segments %}{% if segment %}
-                            {% set current_segment_path = current_segment_path ~ segment ~ "/" %}
-                            <li class="breadcrumb-item"><a href="/?path={{ current_segment_path | urlencode }}">{{ segment }}</a></li>
-                        {% endif %}{% endfor %}
-                    </ol>
-                </nav>
-            </div>
-            <div class="card-body file-container" id="fileContainer">
-                {% if files %}
-                    <div class="row row-cols-1 g-2" id="file-list-view">
-                        {% for item in files %}
-                        <div class="col file-item" data-name="{{ item.name }}" data-path="{{ item.relative_path | urlencode }}" data-is-dir="{{ item.is_dir }}">
-                            <div class="d-flex align-items-center p-2 border rounded">
-                                <div class="flex-shrink-0 me-3 fs-4">
-                                    {% if item.is_dir %}<i class="bi bi-folder-fill text-primary"></i>{% else %}<i class="bi bi-file-earmark"></i>{% endif %}
-                                </div>
-                                <div class="flex-grow-1">
-                                    {% if item.is_dir %}
-                                        <a href="/?path={{ item.relative_path | urlencode }}" class="text-decoration-none text-dark stretched-link">{{ item.name }}</a>
-                                    {% else %}
-                                        <span>{{ item.name }}</span>
-                                    {% endif %}
-                                </div>
-                                {% if not item.is_dir %}
-                                <div class="text-muted small me-3">{{ item.size }} bytes</div>
-                                {% endif %}
-                                <div class="dropdown">
-                                    <button class="btn btn-sm btn-light" type="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-three-dots-vertical"></i></button>
-                                    <ul class="dropdown-menu">
-                                        {% if not item.is_dir %}
-                                        <li><a class="dropdown-item preview-btn" href="#">Preview</a></li>
-                                        <li><a class="dropdown-item download-btn" href="#">Download</a></li>
-                                        <li><hr class="dropdown-divider"></li>
-                                        {% endif %}
-                                        <li><a class="dropdown-item rename-btn" href="#">Rename</a></li>
-                                        <li><a class="dropdown-item delete-btn" href="#">Delete</a></li>
-                                    </ul>
-                                </div>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    </div>
-                {% else %}
-                    <p class="text-muted">Directory is empty.</p>
-                {% endif %}
-            </div>
+
+        <!-- Quick Search -->
+        <div class="input-group mb-3">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="searchFiles" placeholder="Search files..." oninput="filterFiles()">
         </div>
+
+        <!-- Drag and Drop Upload Zone -->
+        <div id="dropZone" class="drag-zone mb-3 d-none">
+            <i class="bi bi-cloud-upload fs-1 text-muted"></i>
+            <p class="mb-0">Drop files here to upload</p>
+        </div>
+
+        <!-- File List -->
+        <div id="fileList" class="list-view">
+            {% if files %}
+                {% for file in files %}
+                <div class="file-item d-flex align-items-center p-2 border-bottom" data-name="{{ file.name|lower }}">
+                    <input type="checkbox" class="form-check-input me-2 file-checkbox" 
+                           data-name="{{ file.name }}" data-path="{{ file.relative_path }}">
+                    
+                    <div class="file-icon me-2">
+                        {% if file.is_dir %}
+                            <i class="bi bi-folder-fill text-primary"></i>
+                        {% else %}
+                            <i class="bi bi-file-earmark text-muted"></i>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="file-info flex-grow-1">
+                        {% if file.is_dir %}
+                            <a href="/?path={{ file.relative_path }}" class="text-decoration-none">
+                                <strong>{{ file.name }}</strong>
+                            </a>
+                        {% else %}
+                            <span class="file-name">{{ file.name }}</span>
+                            <small class="text-muted d-block">
+                                {{ file.size }} bytes
+                            </small>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="file-actions">
+                        {% if not file.is_dir %}
+                            <button class="btn btn-sm btn-outline-secondary me-1" 
+                                    onclick="previewFile('{{ file.relative_path }}')">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            <a href="/download/{{ file.relative_path }}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-download"></i>
+                            </a>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="text-center py-5 text-muted">
+                    <i class="bi bi-folder-x fs-1"></i>
+                    <p>No files found</p>
+                </div>
+            {% endif %}
+        </div>
+        
         {% else %}
-        <div class="text-center p-5">
-            <h3 class="text-muted">Drive is Locked</h3>
-            <p>Unlock the drive from the sidebar to view files.</p>
+        <!-- Device Locked State -->
+        <div class="text-center py-5">
+            <i class="bi bi-lock-fill fs-1 text-muted"></i>
+            <h3 class="text-muted">Device is Locked</h3>
+            <p>Please unlock your LUKS device to access files.</p>
         </div>
         {% endif %}
     </div>
 </div>
 
-<!-- Modals -->
-<div class="modal fade" id="createFolderModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
-    <form action="/create_folder" method="POST">
-        <div class="modal-header"><h5 class="modal-title">Create New Folder</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body">
-            <input type="hidden" name="current_path" value="{{ current_path }}">
-            <input type="text" name="folder_name" class="form-control" placeholder="Folder Name" required>
+<!-- Create Folder Modal -->
+<div class="modal fade" id="createFolderModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Create New Folder</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="/create_folder" method="POST">
+                <div class="modal-body">
+                    <input type="hidden" name="current_path" value="{{ current_path }}">
+                    <div class="mb-3">
+                        <label class="form-label">Folder Name</label>
+                        <input type="text" name="folder_name" class="form-control" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create</button>
+                </div>
+            </form>
         </div>
-        <div class="modal-footer"><button type="submit" class="btn btn-primary">Create</button></div>
-    </form>
-</div></div></div>
+    </div>
+</div>
 
-<div class="modal fade" id="renameModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
-    <form action="/rename" method="POST">
-        <div class="modal-header"><h5 class="modal-title">Rename Item</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body">
-            <input type="hidden" name="current_path" value="{{ current_path }}">
-            <input type="hidden" id="renameOldName" name="old_name">
-            <input type="text" id="renameNewName" name="new_name" class="form-control" required>
+<!-- Upload Modal -->
+<div class="modal fade" id="uploadModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Upload Files</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="uploadForm" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="fileInput" class="form-label">Select files to upload:</label>
+                        <input type="file" class="form-control" id="fileInput" name="files" multiple>
+                    </div>
+                    <div class="upload-drop-zone text-center p-4 border border-dashed border-secondary rounded" id="dropZone">
+                        <i class="bi bi-cloud-upload fs-1 text-muted"></i>
+                        <p class="mb-0">Drop files here to upload</p>
+                    </div>
+                    <div class="mt-3" id="fileList"></div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="uploadBtn" disabled>Upload</button>
+            </div>
         </div>
-        <div class="modal-footer"><button type="submit" class="btn btn-primary">Rename</button></div>
-    </form>
-</div></div></div>
+    </div>
+</div>
 
-<div class="modal fade" id="deleteModal" tabindex="-1"><div class="modal-dialog"><div class="modal-content">
-    <form action="/delete" method="POST">
-        <div class="modal-header"><h5 class="modal-title">Confirm Delete</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-        <div class="modal-body">
-            <input type="hidden" name="current_path" value="{{ current_path }}">
-            <input type="hidden" id="deleteItemName" name="item_name">
-            <p>Are you sure you want to delete <strong id="deleteItemNameDisplay"></strong>? This action cannot be undone.</p>
+<!-- Preview Modal -->
+<div class="modal fade" id="previewModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="previewModalLabel">File Preview</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="previewModalBody" style="max-height: 80vh; overflow-y: auto;"></div>
         </div>
-        <div class="modal-footer"><button type="submit" class="btn btn-danger">Delete</button></div>
-    </form>
-</div></div></div>
-
-<div class="modal fade" id="previewModal" tabindex="-1"><div class="modal-dialog modal-xl"><div class="modal-content">
-    <div class="modal-header"><h5 class="modal-title" id="previewModalLabel">File Preview</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-    <div class="modal-body" id="previewModalBody" style="max-height: 80vh; overflow-y: auto;"></div>
-</div></div></div>
-
-<!-- Context Menu -->
-<div id="contextMenu" class="dropdown-menu">
-    <a class="dropdown-item preview-btn" href="#">Preview</a>
-    <a class="dropdown-item download-btn" href="#">Download</a>
-    <div class="dropdown-divider"></div>
-    <a class="dropdown-item rename-btn" href="#">Rename</a>
-    <a class="dropdown-item delete-btn" href="#">Delete</a>
+    </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-window.addEventListener('load', () => {
-    // Modal instances
-    const renameModal = new bootstrap.Modal(document.getElementById('renameModal'));
-    const deleteModal = new bootstrap.Modal(document.getElementById('deleteModal'));
-    const previewModal = new bootstrap.Modal(document.getElementById('previewModal'));
+// Fast file operations optimized for old hardware
+let selectedFiles = new Set();
 
-    // DOM elements
-    const fileContainer = document.getElementById('fileContainer');
-    const contextMenu = document.getElementById('contextMenu');
-
-    // View toggle buttons
-    const listViewBtn = document.getElementById('listViewBtn');
-    const gridViewBtn = document.getElementById('gridViewBtn');
-    const fileListView = document.getElementById('file-list-view');
-
-    listViewBtn.addEventListener('click', () => {
-        fileListView.classList.remove('row-cols-md-4');
-        fileListView.classList.add('row-cols-1');
-        listViewBtn.classList.add('active');
-        gridViewBtn.classList.remove('active');
-    });
-
-    gridViewBtn.addEventListener('click', () => {
-        fileListView.classList.remove('row-cols-1');
-        fileListView.classList.add('row-cols-md-4');
-        gridViewBtn.classList.add('active');
-        listViewBtn.classList.remove('active');
-    });
-
-    // Context Menu Logic
-    fileContainer.addEventListener('contextmenu', (e) => {
-        const targetItem = e.target.closest('.file-item');
-        if (!targetItem) return;
-        
-        e.preventDefault();
-        contextMenu.style.top = `${e.pageY}px`;
-        contextMenu.style.left = `${e.pageX}px`;
-        contextMenu.classList.add('show');
-        contextMenu.setAttribute('data-target-name', targetItem.dataset.name);
-        contextMenu.setAttribute('data-target-path', targetItem.dataset.path);
-        contextMenu.setAttribute('data-target-is-dir', targetItem.dataset.isDir);
-
-        // Hide preview/download for directories
-        const isDir = targetItem.dataset.isDir === 'true';
-        contextMenu.querySelectorAll('.preview-btn, .download-btn, .dropdown-divider').forEach(el => {
-            el.style.display = isDir ? 'none' : 'block';
+// Optimized search functionality
+function filterFiles() {
+    const searchTerm = document.getElementById('searchFiles').value.toLowerCase();
+    const fileItems = document.querySelectorAll('.file-item');
+    
+    // Use requestAnimationFrame for smooth performance
+    requestAnimationFrame(() => {
+        fileItems.forEach(item => {
+            const fileName = item.dataset.name;
+            item.style.display = fileName.includes(searchTerm) ? 'flex' : 'none';
         });
     });
+}
 
-    document.addEventListener('click', () => contextMenu.classList.remove('show'));
-
-    // Event delegation for all action buttons (in list and context menu)
-    document.body.addEventListener('click', async (e) => {
-        const target = e.target;
-        const itemElement = target.closest('.file-item') || document.querySelector(`[data-name='${contextMenu.dataset.targetName}']`);
-        
-        if (!itemElement && !contextMenu.classList.contains('show')) return;
-
-        const itemName = itemElement ? itemElement.dataset.name : contextMenu.dataset.targetName;
-        const itemPath = itemElement ? itemElement.dataset.path : contextMenu.dataset.targetPath;
-
-        if (target.matches('.rename-btn')) {
-            document.getElementById('renameOldName').value = itemName;
-            document.getElementById('renameNewName').value = itemName;
-            renameModal.show();
-        } else if (target.matches('.delete-btn')) {
-            document.getElementById('deleteItemName').value = itemName;
-            document.getElementById('deleteItemNameDisplay').textContent = itemName;
-            deleteModal.show();
-        } else if (target.matches('.download-btn')) {
-            window.location.href = `/download/${itemPath}`;
-        } else if (target.matches('.preview-btn')) {
-            const previewModalBody = document.getElementById('previewModalBody');
-            const previewModalLabel = document.getElementById('previewModalLabel');
-            const previewUrl = `/preview/${itemPath}`;
-
-            previewModalLabel.textContent = `Preview: ${itemName}`;
-            previewModalBody.innerHTML = '<div class="d-flex justify-content-center"><div class="spinner-border"></div></div>';
-            previewModal.show();
-
-            const response = await fetch(previewUrl);
-            const contentType = response.headers.get('content-type');
-            previewModalBody.innerHTML = '';
-
-            if (contentType.startsWith('image/')) {
-                const blob = await response.blob();
-                const img = document.createElement('img');
-                img.src = URL.createObjectURL(blob);
-                img.style.maxWidth = '100%';
-                previewModalBody.appendChild(img);
-            } else if (contentType.startsWith('text/')) {
-                const text = await response.text();
-                const pre = document.createElement('pre');
-                pre.textContent = text;
-                previewModalBody.appendChild(pre);
-            } else {
-                previewModalBody.textContent = 'Preview not available for this file type.';
-            }
+// Multi-select functionality
+document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('file-checkbox')) {
+        const checkbox = e.target;
+        if (checkbox.checked) {
+            selectedFiles.add(checkbox.dataset.path);
+        } else {
+            selectedFiles.delete(checkbox.dataset.path);
         }
+        updateBulkActions();
+    }
+});
+
+function updateBulkActions() {
+    const bulkActions = document.getElementById('bulkActions');
+    const selectedCount = document.getElementById('selectedCount');
+    
+    if (selectedFiles.size > 0) {
+        bulkActions.classList.remove('d-none');
+        selectedCount.textContent = selectedFiles.size;
+    } else {
+        bulkActions.classList.add('d-none');
+    }
+}
+
+function clearSelection() {
+    selectedFiles.clear();
+    document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false);
+    updateBulkActions();
+}
+
+// Optimized drag and drop
+const dropZone = document.getElementById('dropZone');
+let dragCounter = 0;
+
+['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+    document.addEventListener(eventName, preventDefaults, false);
+});
+
+function preventDefaults(e) {
+    e.preventDefault();
+    e.stopPropagation();
+}
+
+document.addEventListener('dragenter', function(e) {
+    dragCounter++;
+    dropZone.classList.remove('d-none');
+});
+
+document.addEventListener('dragleave', function(e) {
+    dragCounter--;
+    if (dragCounter === 0) {
+        dropZone.classList.add('d-none');
+    }
+});
+
+document.addEventListener('drop', function(e) {
+    dragCounter = 0;
+    dropZone.classList.add('d-none');
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        handleFileUpload(files);
+    }
+});
+
+// Upload functionality
+function handleFileUpload(files) {
+    const fileInput = document.getElementById("fileInput");
+    const uploadBtn = document.getElementById("uploadBtn");
+    const fileList = document.getElementById("fileList");
+    
+    // Clear previous files
+    fileInput.files = files;
+    
+    // Update file list display
+    fileList.innerHTML = "";
+    Array.from(files).forEach(file => {
+        const fileItem = document.createElement("div");
+        fileItem.className = "d-flex justify-content-between align-items-center border rounded p-2 mb-2";
+        fileItem.innerHTML = `
+            <span><i class="bi bi-file"></i> ${file.name}</span>
+            <small class="text-muted">${(file.size / 1024).toFixed(1)} KB</small>
+        `;
+        fileList.appendChild(fileItem);
     });
+    
+    uploadBtn.disabled = files.length === 0;
+}
+
+// Initialize upload modal functionality
+document.addEventListener("DOMContentLoaded", function() {
+    const fileInput = document.getElementById("fileInput");
+    const dropZone = document.getElementById("dropZone");
+    const uploadForm = document.getElementById("uploadForm");
+    const uploadBtn = document.getElementById("uploadBtn");
+    
+    // File input change handler
+    if (fileInput) {
+        fileInput.addEventListener("change", function(e) {
+            handleFileUpload(e.target.files);
+        });
+    }
+    
+    // Drag and drop handlers
+    if (dropZone) {
+        dropZone.addEventListener("dragover", function(e) {
+            e.preventDefault();
+            dropZone.classList.add("border-primary");
+        });
+        
+        dropZone.addEventListener("dragleave", function(e) {
+            e.preventDefault();
+            dropZone.classList.remove("border-primary");
+        });
+        
+        dropZone.addEventListener("drop", function(e) {
+            e.preventDefault();
+            dropZone.classList.remove("border-primary");
+            handleFileUpload(e.dataTransfer.files);
+        });
+        
+        dropZone.addEventListener("click", function() {
+            fileInput.click();
+        });
+    }
+    
+    // Upload button handler
+    if (uploadBtn) {
+        uploadBtn.addEventListener("click", function() {
+            const formData = new FormData();
+            const files = fileInput.files;
+            
+            if (files.length === 0) return;
+            
+            // Add files to form data
+            Array.from(files).forEach(file => {
+                formData.append("files", file);
+            });
+            
+            // Add current path
+            const currentPath = new URLSearchParams(window.location.search).get("path") || "";
+            formData.append("current_path", currentPath);
+            
+            // Disable button and show loading
+            uploadBtn.disabled = true;
+            uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Uploading...';
+            
+            // Submit upload
+            fetch("/upload", {
+                method: "POST",
+                body: formData
+            })
+            .then(response => {
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    throw new Error("Upload failed");
+                }
+            })
+            .catch(error => {
+                alert("Upload failed: " + error.message);
+                uploadBtn.disabled = false;
+                uploadBtn.innerHTML = "Upload";
+            });
+        });
+    }
+});
+
+// Preview functionality
+async function previewFile(path) {
+    const previewModal = new bootstrap.Modal(document.getElementById("previewModal"));
+    const previewModalBody = document.getElementById("previewModalBody");
+    const previewModalLabel = document.getElementById("previewModalLabel");
+    const previewUrl = `/preview/${path}`;
+    
+    previewModalLabel.textContent = `Preview: ${path.split("/").pop()}`;
+    previewModalBody.innerHTML = '<div class="d-flex justify-content-center"><div class="spinner-border"></div></div>';
+    previewModal.show();
+    
+    try {
+        const response = await fetch(previewUrl);
+        const contentType = response.headers.get("content-type");
+        previewModalBody.innerHTML = "";
+        
+        if (contentType && contentType.startsWith("image/")) {
+            const blob = await response.blob();
+            const img = document.createElement("img");
+            img.src = URL.createObjectURL(blob);
+            img.style.maxWidth = "100%";
+            img.style.height = "auto";
+            previewModalBody.appendChild(img);
+        } else if (contentType && contentType.startsWith("text/")) {
+            const text = await response.text();
+            const pre = document.createElement("pre");
+            pre.style.fontSize = "14px";
+            pre.style.lineHeight = "1.4";
+            pre.textContent = text;
+            previewModalBody.appendChild(pre);
+        } else {
+            previewModalBody.innerHTML = '<div class="alert alert-info">Preview not available for this file type.</div>';
+        }
+    } catch (error) {
+        previewModalBody.innerHTML = '<div class="alert alert-danger">Error loading preview</div>';
+    }
+}
+
+// Toggle view (list/grid)
+let isGridView = false;
+function toggleView() {
+    const fileList = document.getElementById('fileList');
+    const viewIcon = document.getElementById('viewIcon');
+    
+    if (isGridView) {
+        fileList.className = 'list-view';
+        viewIcon.className = 'bi bi-list';
+        isGridView = false;
+    } else {
+        fileList.className = 'grid-view row';
+        viewIcon.className = 'bi bi-grid-3x3-gap';
+        isGridView = true;
+    }
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.key === 'a') {
+        e.preventDefault();
+        document.querySelectorAll('.file-checkbox').forEach(cb => {
+            cb.checked = true;
+            selectedFiles.add(cb.dataset.path);
+        });
+        updateBulkActions();
+    }
+    
+    if (e.key === 'Delete' && selectedFiles.size > 0) {
+        if (confirm('Delete selected files?')) {
+            alert('Delete functionality would be implemented here');
+        }
+    }
 });
 </script>
-<style>
-.sidebar { position: sticky; top: 56px; height: calc(100vh - 56px); }
-.file-item .dropdown { visibility: hidden; }
-.file-item:hover .dropdown { visibility: visible; }
-#contextMenu { position: absolute; z-index: 1050; }
-</style>
 {% endblock %}

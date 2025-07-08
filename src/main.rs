@@ -1,3 +1,5 @@
+use actix_multipart::{form::{tempfile::TempFile, MultipartForm}};
+use actix_files::Files;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder, http::header, Error};
 use actix_session::{Session, SessionMiddleware, storage::CookieSessionStore};
 use actix_web_flash_messages::{FlashMessage, IncomingFlashMessages, FlashMessagesFramework};
@@ -47,9 +49,12 @@ struct AppState {
 
 // --- 2. User & Request Models ---
 #[derive(Deserialize)]
+#[derive(Deserialize)]
 struct LoginRequest {
     username: String,
     password: String,
+    remember_me: Option<String>,
+}
 }
 
 #[derive(Deserialize)]
@@ -108,6 +113,13 @@ struct AddUserRequest {
 #[derive(Deserialize)]
 struct DeleteUserRequest {
     user_id: i64,
+}
+
+#[derive(Debug, MultipartForm)]
+struct UploadForm {
+    #[multipart(limit = "100MB")]
+    files: Vec<TempFile>,
+    current_path: actix_multipart::form::text::Text<String>,
 }
 
 
@@ -255,22 +267,77 @@ async fn delete_user(session: Session, form: web::Form<DeleteUserRequest>, app_s
 }
 
 
-async fn login(form: web::Form<LoginRequest>, session: Session, app_state: web::Data<AppState>) -> impl Responder {
+async fn login(form: web::Form<LoginRequest>, session: Session, app_state: web::Data<AppState>, req: actix_web::HttpRequest) -> impl Responder {
+    let client_ip = req
+        .connection_info()
+        .remote_addr()
+        .unwrap_or("unknown")
+        .to_string();
+    
+    // Check recent failed login attempts (last 15 minutes)
+    let recent_failed_attempts = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM login_attempts WHERE username = ? AND success = FALSE AND attempted_at > datetime('now', '-15 minutes')")
+        .bind(&form.username)
+        .fetch_one(&app_state.db)
+        .await
+        .unwrap_or(0);
+    
+    if recent_failed_attempts >= 5 {
+        sqlx::query("INSERT INTO login_attempts (username, ip_address, success) VALUES (?, ?, FALSE)")
+            .bind(&form.username)
+            .bind(&client_ip)
+            .execute(&app_state.db)
+            .await
+            .ok();
+        FlashMessage::error("Account temporarily locked due to too many failed login attempts. Please try again in 15 minutes.").send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish();
+    }
+    
     let user = match sqlx::query_as::<_, User>("SELECT id, username, password_hash, role FROM users WHERE username = ?")
         .bind(&form.username).fetch_optional(&app_state.db).await {
             Ok(Some(user)) => user,
             _ => {
-                FlashMessage::warning("Invalid credentials.").send();
+                // Log failed attempt
+                sqlx::query("INSERT INTO login_attempts (username, ip_address, success) VALUES (?, ?, FALSE)")
+                    .bind(&form.username)
+                    .bind(&client_ip)
+                    .execute(&app_state.db)
+                    .await
+                    .ok();
+                FlashMessage::error("Invalid username or password.").send();
                 return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish();
             }
         };
-
+    
     if verify_password(&user.password_hash, &form.password) {
+        // Log successful attempt
+        sqlx::query("INSERT INTO login_attempts (username, ip_address, success) VALUES (?, ?, TRUE)")
+            .bind(&form.username)
+            .bind(&client_ip)
+            .execute(&app_state.db)
+            .await
+            .ok();
+        
         session.insert("user", user).unwrap();
-        FlashMessage::info("Login successful!").send();
+        
+        // Handle remember me
+        if form.remember_me.is_some() {
+            // Extend session timeout for remember me (optional, depends on session middleware config)
+            FlashMessage::success("Login successful! You will be remembered.").send();
+        } else {
+            FlashMessage::success("Login successful!").send();
+        }
+        
         HttpResponse::Found().insert_header((header::LOCATION, "/")).finish()
     } else {
-        FlashMessage::warning("Invalid credentials.").send();
+        // Log failed attempt
+        sqlx::query("INSERT INTO login_attempts (username, ip_address, success) VALUES (?, ?, FALSE)")
+            .bind(&form.username)
+            .bind(&client_ip)
+            .execute(&app_state.db)
+            .await
+            .ok();
+        FlashMessage::error("Invalid username or password.").send();
         HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish()
     }
 }
@@ -389,6 +456,38 @@ async fn create_folder(app_state: web::Data<AppState>, form: web::Form<CreateFol
     HttpResponse::Found().insert_header((header::LOCATION, format!("/?path={}", form.current_path))).finish()
 }
 
+async fn upload_files(app_state: web::Data<AppState>, MultipartForm(form): MultipartForm<UploadForm>) -> impl Responder {
+    let base_path = PathBuf::from(&app_state.config.mount_point);
+    let current_path = base_path.join(form.current_path.as_str());
+    
+    if !current_path.starts_with(&base_path) {
+        FlashMessage::error("Invalid path.").send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
+    }
+    
+    let mut uploaded_count = 0;
+    let mut errors = Vec::new();
+    
+    for temp_file in form.files {
+        if let Some(filename) = temp_file.file_name {
+            let dest_path = current_path.join(&filename);
+            match temp_file.file.persist(&dest_path) {
+                Ok(_) => uploaded_count += 1,
+                Err(e) => errors.push(format!("Failed to upload {}: {}", filename, e)),
+            }
+        }
+    }
+    
+    if uploaded_count > 0 {
+        FlashMessage::success(format!("Successfully uploaded {} file(s).", uploaded_count)).send();
+    }
+    if !errors.is_empty() {
+        FlashMessage::error(errors.join("; ")).send();
+    }
+    
+    HttpResponse::Found().insert_header((header::LOCATION, format!("/?path={}", form.current_path.as_str()))).finish()
+}
+
 async fn rename_item(app_state: web::Data<AppState>, form: web::Form<RenameRequest>) -> impl Responder {
     let base_path = PathBuf::from(&app_state.config.mount_point);
     let current_path = base_path.join(&form.current_path);
@@ -478,12 +577,14 @@ async fn main() -> std::io::Result<()> {
             .route("/preview/{path:.*}", web::get().to(preview_file))
             .route("/download/{path:.*}", web::get().to(download_file))
             .route("/create_folder", web::post().to(create_folder))
+            .route("/upload", web::post().to(upload_files))
             .route("/rename", web::post().to(rename_item))
             .route("/delete", web::post().to(delete_item))
             .route("/admin/users", web::get().to(show_admin_users))
             .route("/admin/users/add", web::get().to(show_add_user_form))
             .route("/admin/users/add", web::post().to(add_user))
             .route("/admin/users/delete", web::post().to(delete_user))
+            .service(Files::new("/static", "./static").show_files_listing())
     })
     .bind(("127.0.0.1", 8080))?
     .run()

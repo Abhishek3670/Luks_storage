@@ -1,0 +1,345 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-column flex-md-row h-100">
+    <!-- Sidebar -->
+    <div class="sidebar border-end bg-light p-3">
+        <h5 class="mb-3">
+            <i class="bi bi-hdd-stack"></i> Device Status
+        </h5>
+        
+        <div class="card shadow-sm mb-4">
+            <div class="card-body">
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-device-hdd me-2"></i>
+                    <small class="text-muted">{{ config.device_path }}</small>
+                </div>
+                <div class="d-flex align-items-center mb-2">
+                    <i class="bi bi-folder2-open me-2"></i>
+                    <small class="text-muted">{{ config.mount_point }}</small>
+                </div>
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-circle-fill me-2 {% if is_mounted %}text-success{% else %}text-danger{% endif %}"></i>
+                    <span class="badge {% if is_mounted %}bg-success{% else %}bg-danger{% endif %}">
+                        {% if is_mounted %}Mounted{% else %}Locked{% endif %}
+                    </span>
+                </div>
+            </div>
+        </div>
+        
+        {% if not is_mounted %}
+            <div class="card shadow-sm">
+                <div class="card-header bg-success text-white">
+                    <h6 class="mb-0"><i class="bi bi-unlock"></i> Unlock Device</h6>
+                </div>
+                <div class="card-body">
+                    <form action="/unlock" method="POST">
+                        <div class="mb-3">
+                            <input type="password" class="form-control" name="luks_password" 
+                                   placeholder="LUKS Password" required autocomplete="current-password">
+                        </div>
+                        <button type="submit" class="btn btn-success w-100">
+                            <i class="bi bi-unlock-fill"></i> Unlock & Mount
+                        </button>
+                    </form>
+                </div>
+            </div>
+        {% else %}
+            <div class="card shadow-sm">
+                <div class="card-header bg-danger text-white">
+                    <h6 class="mb-0"><i class="bi bi-lock"></i> Lock Device</h6>
+                </div>
+                <div class="card-body text-center">
+                    <form action="/lock" method="POST">
+                        <button type="submit" class="btn btn-danger w-100">
+                            <i class="bi bi-lock-fill"></i> Unmount & Lock
+                        </button>
+                    </form>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content p-3">
+        {% if is_mounted %}
+        <!-- Simple Breadcrumb Navigation -->
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item">
+                    <a href="/"><i class="bi bi-house"></i> Home</a>
+                </li>
+                {% if current_path %}
+                    <li class="breadcrumb-item active">{{ current_path }}</li>
+                {% endif %}
+            </ol>
+        </nav>
+
+        <!-- File Operations Toolbar -->
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="mb-0">
+                <i class="bi bi-folder"></i> File Browser
+            </h4>
+            <div class="btn-group" role="group">
+                <button type="button" class="btn btn-outline-primary btn-sm" onclick="toggleView()">
+                    <i class="bi bi-grid-3x3-gap" id="viewIcon"></i>
+                </button>
+                <button type="button" class="btn btn-outline-success btn-sm" data-bs-toggle="modal" data-bs-target="#uploadModal">
+                    <i class="bi bi-cloud-upload"></i> Upload
+                </button>
+                <button type="button" class="btn btn-outline-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createFolderModal">
+                    <i class="bi bi-folder-plus"></i> New Folder
+                </button>
+            </div>
+        </div>
+
+        <!-- Multi-select Actions (hidden by default) -->
+        <div id="bulkActions" class="alert alert-info d-none">
+            <div class="d-flex justify-content-between align-items-center">
+                <span><span id="selectedCount">0</span> items selected</span>
+                <div>
+                    <button class="btn btn-primary btn-sm" onclick="downloadSelected()">
+                        <i class="bi bi-download"></i> Download
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteSelected()">
+                        <i class="bi bi-trash"></i> Delete
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="clearSelection()">
+                        <i class="bi bi-x"></i> Clear
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Search -->
+        <div class="input-group mb-3">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input type="text" class="form-control" id="searchFiles" placeholder="Search files..." oninput="filterFiles()">
+        </div>
+
+        <!-- Drag and Drop Upload Zone -->
+        <div id="dropZone" class="drag-zone mb-3 d-none">
+            <i class="bi bi-cloud-upload fs-1 text-muted"></i>
+            <p class="mb-0">Drop files here to upload</p>
+        </div>
+
+        <!-- File List -->
+        <div id="fileList" class="list-view">
+            {% if files %}
+                {% for file in files %}
+                <div class="file-item d-flex align-items-center p-2 border-bottom" data-name="{{ file.name|lower }}">
+                    <input type="checkbox" class="form-check-input me-2 file-checkbox" 
+                           data-name="{{ file.name }}" data-path="{{ file.relative_path }}">
+                    
+                    <div class="file-icon me-2">
+                        {% if file.is_dir %}
+                            <i class="bi bi-folder-fill text-primary"></i>
+                        {% else %}
+                            <i class="bi bi-file-earmark text-muted"></i>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="file-info flex-grow-1">
+                        {% if file.is_dir %}
+                            <a href="/?path={{ file.relative_path }}" class="text-decoration-none">
+                                <strong>{{ file.name }}</strong>
+                            </a>
+                        {% else %}
+                            <span class="file-name">{{ file.name }}</span>
+                            <small class="text-muted d-block">
+                                {{ file.size }} bytes
+                            </small>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="file-actions">
+                        {% if not file.is_dir %}
+                            <button class="btn btn-sm btn-outline-secondary me-1" 
+                                    onclick="previewFile('{{ file.relative_path }}')">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                            <a href="/download/{{ file.relative_path }}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-download"></i>
+                            </a>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="text-center py-5 text-muted">
+                    <i class="bi bi-folder-x fs-1"></i>
+                    <p>No files found</p>
+                </div>
+            {% endif %}
+        </div>
+        
+        {% else %}
+        <!-- Device Locked State -->
+        <div class="text-center py-5">
+            <i class="bi bi-lock-fill fs-1 text-muted"></i>
+            <h3 class="text-muted">Device is Locked</h3>
+            <p>Please unlock your LUKS device to access files.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Create Folder Modal -->
+<div class="modal fade" id="createFolderModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Create New Folder</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="/create_folder" method="POST">
+                <div class="modal-body">
+                    <input type="hidden" name="current_path" value="{{ current_path }}">
+                    <div class="mb-3">
+                        <label class="form-label">Folder Name</label>
+                        <input type="text" name="folder_name" class="form-control" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Fast file operations optimized for old hardware
+let selectedFiles = new Set();
+
+// Optimized search functionality
+function filterFiles() {
+    const searchTerm = document.getElementById('searchFiles').value.toLowerCase();
+    const fileItems = document.querySelectorAll('.file-item');
+    
+    // Use requestAnimationFrame for smooth performance
+    requestAnimationFrame(() => {
+        fileItems.forEach(item => {
+            const fileName = item.dataset.name;
+            item.style.display = fileName.includes(searchTerm) ? 'flex' : 'none';
+        });
+    });
+}
+
+// Multi-select functionality
+document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('file-checkbox')) {
+        const checkbox = e.target;
+        if (checkbox.checked) {
+            selectedFiles.add(checkbox.dataset.path);
+        } else {
+            selectedFiles.delete(checkbox.dataset.path);
+        }
+        updateBulkActions();
+    }
+});
+
+function updateBulkActions() {
+    const bulkActions = document.getElementById('bulkActions');
+    const selectedCount = document.getElementById('selectedCount');
+    
+    if (selectedFiles.size > 0) {
+        bulkActions.classList.remove('d-none');
+        selectedCount.textContent = selectedFiles.size;
+    } else {
+        bulkActions.classList.add('d-none');
+    }
+}
+
+function clearSelection() {
+    selectedFiles.clear();
+    document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false);
+    updateBulkActions();
+}
+
+// Optimized drag and drop
+const dropZone = document.getElementById('dropZone');
+let dragCounter = 0;
+
+['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+    document.addEventListener(eventName, preventDefaults, false);
+});
+
+function preventDefaults(e) {
+    e.preventDefault();
+    e.stopPropagation();
+}
+
+document.addEventListener('dragenter', function(e) {
+    dragCounter++;
+    dropZone.classList.remove('d-none');
+});
+
+document.addEventListener('dragleave', function(e) {
+    dragCounter--;
+    if (dragCounter === 0) {
+        dropZone.classList.add('d-none');
+    }
+});
+
+document.addEventListener('drop', function(e) {
+    dragCounter = 0;
+    dropZone.classList.add('d-none');
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+        handleFileUpload(files);
+    }
+});
+
+function handleFileUpload(files) {
+    // Simple alert for now - can be enhanced with actual upload logic
+    alert(`${files.length} file(s) ready for upload`);
+}
+
+// Preview functionality
+function previewFile(path) {
+    window.open(`/preview/${path}`, '_blank');
+}
+
+// Toggle view (list/grid)
+let isGridView = false;
+function toggleView() {
+    const fileList = document.getElementById('fileList');
+    const viewIcon = document.getElementById('viewIcon');
+    
+    if (isGridView) {
+        fileList.className = 'list-view';
+        viewIcon.className = 'bi bi-list';
+        isGridView = false;
+    } else {
+        fileList.className = 'grid-view row';
+        viewIcon.className = 'bi bi-grid-3x3-gap';
+        isGridView = true;
+    }
+}
+
+// Keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+    if (e.ctrlKey && e.key === 'a') {
+        e.preventDefault();
+        document.querySelectorAll('.file-checkbox').forEach(cb => {
+            cb.checked = true;
+            selectedFiles.add(cb.dataset.path);
+        });
+        updateBulkActions();
+    }
+    
+    if (e.key === 'Delete' && selectedFiles.size > 0) {
+        if (confirm('Delete selected files?')) {
+            alert('Delete functionality would be implemented here');
+        }
+    }
+});
+</script>
+{% endblock %}

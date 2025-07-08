@@ -1,0 +1,80 @@
+/* Custom optimizations for old hardware */
+* {
+    box-sizing: border-box;
+}
+
+/* Disable expensive animations on old hardware */
+*, *::before, *::after {
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+}
+
+/* Fast loading optimizations */
+.file-item {
+    contain: layout style;
+}
+
+.file-list {
+    contain: layout;
+}
+
+/* Virtual scrolling for large file lists */
+.file-container {
+    height: 500px;
+    overflow-y: auto;
+    will-change: transform;
+}
+
+/* Minimal shadows for better performance */
+.card {
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
+}
+
+/* Faster hover effects */
+.file-item:hover {
+    background-color: #f8f9fa;
+}
+
+/* Optimized drag zone */
+.drag-zone {
+    will-change: background-color, border-color;
+}
+
+/* Quick theme switching */
+[data-bs-theme="dark"] {
+    background-color: #121212;
+    color: #ffffff;
+}
+
+[data-bs-theme="dark"] .bg-light {
+    background-color: #1e1e1e !important;
+}
+
+[data-bs-theme="dark"] .border-end {
+    border-color: #333 !important;
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+    .sidebar {
+        min-width: 100% !important;
+        position: sticky;
+        top: 56px;
+        z-index: 1000;
+    }
+    
+    .main-content {
+        padding: 1rem !important;
+    }
+    
+    .file-item {
+        padding: 12px 8px;
+    }
+}
+
+/* Print styles */
+@media print {
+    .sidebar, .navbar, .modal {
+        display: none !important;
+    }
+}

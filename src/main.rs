@@ -11,8 +11,7 @@ use tera::{Tera, Context};
 use rand::{Rng, thread_rng};
 use rand::distributions::Alphanumeric;
 use tokio::process::Command;
-use tokio::fs::{self, File};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::fs;
 use mime_guess::from_path;
 use std::os::unix::fs::MetadataExt;
 use sqlx::{SqlitePool, FromRow};
@@ -49,12 +48,9 @@ struct AppState {
 
 // --- 2. User & Request Models ---
 #[derive(Deserialize)]
-#[derive(Deserialize)]
 struct LoginRequest {
     username: String,
     password: String,
-    remember_me: Option<String>,
-}
 }
 
 #[derive(Deserialize)]
@@ -86,21 +82,21 @@ struct DashboardQuery {
 
 #[derive(Deserialize)]
 struct CreateFolderRequest {
-    current_path: String,
     folder_name: String,
+    current_path: String,
 }
 
 #[derive(Deserialize)]
 struct RenameRequest {
-    current_path: String,
     old_name: String,
     new_name: String,
+    current_path: String,
 }
 
 #[derive(Deserialize)]
 struct DeleteRequest {
-    current_path: String,
     item_name: String,
+    current_path: String,
 }
 
 #[derive(Deserialize)]
@@ -121,9 +117,6 @@ struct UploadForm {
     files: Vec<TempFile>,
     current_path: actix_multipart::form::text::Text<String>,
 }
-
-
-// --- HELPER FUNCTIONS ---
 async fn check_if_mounted(mount_point: &str) -> bool {
     let path = Path::new(mount_point);
     if !path.is_dir() { return false; }
@@ -267,77 +260,22 @@ async fn delete_user(session: Session, form: web::Form<DeleteUserRequest>, app_s
 }
 
 
-async fn login(form: web::Form<LoginRequest>, session: Session, app_state: web::Data<AppState>, req: actix_web::HttpRequest) -> impl Responder {
-    let client_ip = req
-        .connection_info()
-        .remote_addr()
-        .unwrap_or("unknown")
-        .to_string();
-    
-    // Check recent failed login attempts (last 15 minutes)
-    let recent_failed_attempts = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM login_attempts WHERE username = ? AND success = FALSE AND attempted_at > datetime('now', '-15 minutes')")
-        .bind(&form.username)
-        .fetch_one(&app_state.db)
-        .await
-        .unwrap_or(0);
-    
-    if recent_failed_attempts >= 5 {
-        sqlx::query("INSERT INTO login_attempts (username, ip_address, success) VALUES (?, ?, FALSE)")
-            .bind(&form.username)
-            .bind(&client_ip)
-            .execute(&app_state.db)
-            .await
-            .ok();
-        FlashMessage::error("Account temporarily locked due to too many failed login attempts. Please try again in 15 minutes.").send();
-        return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish();
-    }
-    
+async fn login(form: web::Form<LoginRequest>, session: Session, app_state: web::Data<AppState>) -> impl Responder {
     let user = match sqlx::query_as::<_, User>("SELECT id, username, password_hash, role FROM users WHERE username = ?")
         .bind(&form.username).fetch_optional(&app_state.db).await {
             Ok(Some(user)) => user,
             _ => {
-                // Log failed attempt
-                sqlx::query("INSERT INTO login_attempts (username, ip_address, success) VALUES (?, ?, FALSE)")
-                    .bind(&form.username)
-                    .bind(&client_ip)
-                    .execute(&app_state.db)
-                    .await
-                    .ok();
-                FlashMessage::error("Invalid username or password.").send();
+                FlashMessage::warning("Invalid credentials.").send();
                 return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish();
             }
         };
-    
+
     if verify_password(&user.password_hash, &form.password) {
-        // Log successful attempt
-        sqlx::query("INSERT INTO login_attempts (username, ip_address, success) VALUES (?, ?, TRUE)")
-            .bind(&form.username)
-            .bind(&client_ip)
-            .execute(&app_state.db)
-            .await
-            .ok();
-        
         session.insert("user", user).unwrap();
-        
-        // Handle remember me
-        if form.remember_me.is_some() {
-            // Extend session timeout for remember me (optional, depends on session middleware config)
-            FlashMessage::success("Login successful! You will be remembered.").send();
-        } else {
-            FlashMessage::success("Login successful!").send();
-        }
-        
+        FlashMessage::info("Login successful!").send();
         HttpResponse::Found().insert_header((header::LOCATION, "/")).finish()
     } else {
-        // Log failed attempt
-        sqlx::query("INSERT INTO login_attempts (username, ip_address, success) VALUES (?, ?, FALSE)")
-            .bind(&form.username)
-            .bind(&client_ip)
-            .execute(&app_state.db)
-            .await
-            .ok();
-        FlashMessage::error("Invalid username or password.").send();
+        FlashMessage::warning("Invalid credentials.").send();
         HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish()
     }
 }

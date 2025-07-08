@@ -100,6 +100,18 @@ struct DeleteRequest {
 }
 
 #[derive(Deserialize)]
+struct CopyRequest {
+    source_paths: Vec<String>,
+    destination_path: String,
+}
+
+#[derive(Deserialize)]
+struct MoveRequest {
+    source_paths: Vec<String>,
+    destination_path: String,
+}
+
+#[derive(Deserialize)]
 struct AddUserRequest {
     username: String,
     password: String,
@@ -442,22 +454,6 @@ async fn rename_item(app_state: web::Data<AppState>, form: web::Form<RenameReque
     HttpResponse::Found().insert_header((header::LOCATION, format!("/?path={}", form.current_path))).finish()
 }
 
-
-// JSON version of delete for bulk operations
-async fn delete_item_json(app_state: web::Data<AppState>, req: web::Json<DeleteRequest>) -> impl Responder {
-    let base_path = PathBuf::from(&app_state.config.mount_point);
-    let current_path = base_path.join(&req.current_path);
-    if !current_path.starts_with(&base_path) {
-        return HttpResponse::BadRequest().json("Invalid path.");
-    }
-    let item_path = current_path.join(&req.item_name);
-    let result = if item_path.is_dir() { fs::remove_dir_all(item_path).await } else { fs::remove_file(item_path).await };
-    match result {
-        Ok(_) => HttpResponse::Ok().json("Item deleted successfully."),
-        Err(e) => HttpResponse::InternalServerError().json(format!("Failed to delete item: {}", e)),
-    }
-}
-
 async fn delete_item(app_state: web::Data<AppState>, form: web::Form<DeleteRequest>) -> impl Responder {
     let base_path = PathBuf::from(&app_state.config.mount_point);
     let current_path = base_path.join(&form.current_path);
@@ -472,6 +468,90 @@ async fn delete_item(app_state: web::Data<AppState>, form: web::Form<DeleteReque
         Err(e) => FlashMessage::error(format!("Failed to delete item: {}", e)).send(),
     }
     HttpResponse::Found().insert_header((header::LOCATION, format!("/?path={}", form.current_path))).finish()
+}
+
+// Copy files/folders
+async fn copy_items(app_state: web::Data<AppState>, req: web::Json<CopyRequest>) -> impl Responder {
+    let base_path = PathBuf::from(&app_state.config.mount_point);
+    let dest_path = base_path.join(&req.destination_path);
+    
+    if !dest_path.starts_with(&base_path) || !dest_path.is_dir() {
+        return HttpResponse::BadRequest().json("Invalid destination path.");
+    }
+    
+    let mut results = Vec::new();
+    
+    for source_rel_path in &req.source_paths {
+        let source_path = base_path.join(source_rel_path);
+        if !source_path.starts_with(&base_path) {
+            results.push(format!("Invalid source path: {}", source_rel_path));
+            continue;
+        }
+        
+        let file_name = source_path.file_name().unwrap().to_string_lossy();
+        let dest_file_path = dest_path.join(file_name.as_ref());
+        
+        let result = if source_path.is_dir() {
+            Command::new("cp")
+                .arg("-r")
+                .arg(&source_path)
+                .arg(&dest_file_path)
+                .output()
+                .await
+        } else {
+            Command::new("cp")
+                .arg(&source_path)
+                .arg(&dest_file_path)
+                .output()
+                .await
+        };
+        
+        match result {
+            Ok(output) if output.status.success() => {
+                results.push(format!("Copied: {}", file_name));
+            },
+            Ok(output) => {
+                results.push(format!("Failed to copy {}: {}", file_name, String::from_utf8_lossy(&output.stderr)));
+            },
+            Err(e) => {
+                results.push(format!("Failed to copy {}: {}", file_name, e));
+            }
+        }
+    }
+    
+    HttpResponse::Ok().json(results)
+}
+
+// Move files/folders
+async fn move_items(app_state: web::Data<AppState>, req: web::Json<MoveRequest>) -> impl Responder {
+    let base_path = PathBuf::from(&app_state.config.mount_point);
+    let dest_path = base_path.join(&req.destination_path);
+    
+    if !dest_path.starts_with(&base_path) || !dest_path.is_dir() {
+        return HttpResponse::BadRequest().json("Invalid destination path.");
+    }
+    
+    let mut results = Vec::new();
+    
+    for source_rel_path in &req.source_paths {
+        let source_path = base_path.join(source_rel_path);
+        if !source_path.starts_with(&base_path) {
+            results.push(format!("Invalid source path: {}", source_rel_path));
+            continue;
+        }
+        
+        let file_name = source_path.file_name().unwrap().to_string_lossy();
+        let dest_file_path = dest_path.join(file_name.as_ref());
+        
+        let result = fs::rename(&source_path, &dest_file_path).await;
+        
+        match result {
+            Ok(_) => results.push(format!("Moved: {}", file_name)),
+            Err(e) => results.push(format!("Failed to move {}: {}", file_name, e)),
+        }
+    }
+    
+    HttpResponse::Ok().json(results)
 }
 
 
@@ -534,7 +614,8 @@ async fn main() -> std::io::Result<()> {
             .route("/upload", web::post().to(upload_files))
             .route("/rename", web::post().to(rename_item))
             .route("/delete", web::post().to(delete_item))
-            .route("/delete_json", web::post().to(delete_item_json))
+            .route("/copy", web::post().to(copy_items))
+            .route("/move", web::post().to(move_items))
             .route("/admin/users", web::get().to(show_admin_users))
             .route("/admin/users/add", web::get().to(show_add_user_form))
             .route("/admin/users/add", web::post().to(add_user))

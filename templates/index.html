@@ -100,6 +100,12 @@
             <div class="d-flex justify-content-between align-items-center">
                 <span><span id="selectedCount">0</span> items selected</span>
                 <div>
+                    <button class="btn btn-warning btn-sm" onclick="copySelected()">
+                        <i class="bi bi-files"></i> Copy
+                    </button>
+                    <button class="btn btn-info btn-sm" onclick="cutSelected()">
+                        <i class="bi bi-scissors"></i> Cut
+                    </button>
                     <button class="btn btn-primary btn-sm" onclick="downloadSelected()">
                         <i class="bi bi-download"></i> Download
                     </button>
@@ -108,6 +114,21 @@
                     </button>
                     <button class="btn btn-secondary btn-sm" onclick="clearSelection()">
                         <i class="bi bi-x"></i> Clear
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Clipboard Actions (hidden by default) -->
+        <div id="clipboardActions" class="alert alert-warning d-none">
+            <div class="d-flex justify-content-between align-items-center">
+                <span><span id="clipboardCount">0</span> items in clipboard (<span id="clipboardAction">copy</span>)</span>
+                <div>
+                    <button class="btn btn-success btn-sm" onclick="pasteItems()">
+                        <i class="bi bi-clipboard-check"></i> Paste Here
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="clearClipboard()">
+                        <i class="bi bi-x-circle"></i> Clear Clipboard
                     </button>
                 </div>
             </div>
@@ -129,7 +150,7 @@
         <div id="fileList" class="list-view">
             {% if files %}
                 {% for file in files %}
-                <div class="file-item" data-name="{{ file.name|lower }}">
+                <div class="file-item" data-name="{{ file.name|lower }}" data-path="{{ file.relative_path }}" data-is-dir="{{ file.is_dir }}">
                     <input type="checkbox" class="form-check-input me-2 file-checkbox" 
                            data-name="{{ file.name }}" data-path="{{ file.relative_path }}">
                     
@@ -258,7 +279,7 @@
 <script>
 // Fast file operations optimized for old hardware
 let selectedFiles = new Set();
-let clipboard = { action: null, path: null };
+let clipboard = { action: null, paths: [], count: 0 };
 
 // Optimized search functionality
 function filterFiles() {
@@ -298,13 +319,176 @@ function updateBulkActions() {
     }
 }
 
+function updateClipboardActions() {
+    const clipboardActions = document.getElementById('clipboardActions');
+    const clipboardCount = document.getElementById('clipboardCount');
+    const clipboardAction = document.getElementById('clipboardAction');
+    
+    if (clipboard.count > 0) {
+        clipboardActions.classList.remove('d-none');
+        clipboardCount.textContent = clipboard.count;
+        clipboardAction.textContent = clipboard.action;
+    } else {
+        clipboardActions.classList.add('d-none');
+    }
+}
+
 function clearSelection() {
     selectedFiles.clear();
     document.querySelectorAll('.file-checkbox').forEach(cb => cb.checked = false);
     updateBulkActions();
 }
 
-// Optimized drag and drop
+function clearClipboard() {
+    clipboard = { action: null, paths: [], count: 0 };
+    updateClipboardActions();
+}
+
+// Copy and Cut functionality
+function copySelected() {
+    if (selectedFiles.size === 0) {
+        alert('No files selected');
+        return;
+    }
+    
+    clipboard.action = 'copy';
+    clipboard.paths = Array.from(selectedFiles);
+    clipboard.count = selectedFiles.size;
+    updateClipboardActions();
+    clearSelection();
+}
+
+function cutSelected() {
+    if (selectedFiles.size === 0) {
+        alert('No files selected');
+        return;
+    }
+    
+    clipboard.action = 'cut';
+    clipboard.paths = Array.from(selectedFiles);
+    clipboard.count = selectedFiles.size;
+    updateClipboardActions();
+    clearSelection();
+}
+
+function pasteItems() {
+    if (clipboard.count === 0) {
+        alert('No items in clipboard');
+        return;
+    }
+    
+    const currentPath = new URLSearchParams(window.location.search).get("path") || "";
+    const endpoint = clipboard.action === 'copy' ? '/copy' : '/move';
+    
+    fetch(endpoint, {
+        method: 'POST',
+        headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        },
+        body: JSON.stringify({
+            source_paths: clipboard.paths,
+            destination_path: currentPath
+        })
+    })
+    .then(response => response.json())
+    .then(results => {
+        const successCount = results.filter(r => r.includes('Copied:') || r.includes('Moved:')).length;
+        const failureCount = results.length - successCount;
+        
+        if (failureCount > 0) {
+            alert(`Operation completed with ${successCount} success(es) and ${failureCount} failure(s)`);
+        } else {
+            alert(`Successfully ${clipboard.action === 'copy' ? 'copied' : 'moved'} ${successCount} item(s)`);
+        }
+        
+        // Clear clipboard after move operation
+        if (clipboard.action === 'cut') {
+            clearClipboard();
+        }
+        
+        location.reload();
+    })
+    .catch(error => {
+        alert(`Error: ${error}`);
+    });
+}
+
+// Drag and Drop for file movement
+function setupFileDragAndDrop() {
+    const fileItems = document.querySelectorAll('.file-item');
+    
+    fileItems.forEach(item => {
+        const isDir = item.dataset.isDir === 'true';
+        const filePath = item.dataset.path;
+        
+        // Make files draggable
+        item.draggable = true;
+        
+        item.addEventListener('dragstart', function(e) {
+            e.dataTransfer.setData('text/plain', filePath);
+            e.dataTransfer.effectAllowed = 'move';
+            item.style.opacity = '0.5';
+        });
+        
+        item.addEventListener('dragend', function(e) {
+            item.style.opacity = '1';
+        });
+        
+        // Only allow drop on directories
+        if (isDir) {
+            item.addEventListener('dragover', function(e) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                item.style.backgroundColor = '#e3f2fd';
+            });
+            
+            item.addEventListener('dragleave', function(e) {
+                item.style.backgroundColor = '';
+            });
+            
+            item.addEventListener('drop', function(e) {
+                e.preventDefault();
+                item.style.backgroundColor = '';
+                
+                const sourcePath = e.dataTransfer.getData('text/plain');
+                const destPath = filePath;
+                
+                if (sourcePath === destPath) {
+                    alert('Cannot move item to itself');
+                    return;
+                }
+                
+                // Move the file
+                fetch('/move', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        source_paths: [sourcePath],
+                        destination_path: destPath
+                    })
+                })
+                .then(response => response.json())
+                .then(results => {
+                    if (results[0].includes('Moved:')) {
+                        alert('File moved successfully');
+                    } else {
+                        alert('Failed to move file: ' + results[0]);
+                    }
+                    location.reload();
+                })
+                .catch(error => {
+                    alert(`Error: ${error}`);
+                });
+            });
+        }
+    });
+}
+
+// Optimized drag and drop for uploads
 const dropZone = document.getElementById('dropZone');
 let dragCounter = 0;
 
@@ -318,24 +502,28 @@ function preventDefaults(e) {
 }
 
 document.addEventListener('dragenter', function(e) {
-    dragCounter++;
-    if(dropZone) dropZone.classList.remove('d-none');
+    // Only show upload zone for external files
+    if (e.dataTransfer.types.includes('Files')) {
+        dragCounter++;
+        if(dropZone) dropZone.classList.remove('d-none');
+    }
 });
 
 document.addEventListener('dragleave', function(e) {
-    dragCounter--;
-    if (dragCounter === 0) {
-        if(dropZone) dropZone.classList.add('d-none');
+    if (e.dataTransfer.types.includes('Files')) {
+        dragCounter--;
+        if (dragCounter === 0) {
+            if(dropZone) dropZone.classList.add('d-none');
+        }
     }
 });
 
 document.addEventListener('drop', function(e) {
-    dragCounter = 0;
-    if(dropZone) dropZone.classList.add('d-none');
-    
-    const files = e.dataTransfer.files;
-    if (files.length > 0) {
-        handleFileUpload(files);
+    // Handle file uploads
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        dragCounter = 0;
+        if(dropZone) dropZone.classList.add('d-none');
+        handleFileUpload(e.dataTransfer.files);
     }
 });
 
@@ -369,6 +557,9 @@ document.addEventListener("DOMContentLoaded", function() {
     const uploadDropZone = document.getElementById("uploadDropZone");
     const uploadForm = document.getElementById("uploadForm");
     const uploadBtn = document.getElementById("uploadBtn");
+    
+    // Setup drag and drop for file movement
+    setupFileDragAndDrop();
     
     if (fileInput) {
         fileInput.addEventListener("change", function(e) {
@@ -487,6 +678,9 @@ function toggleView() {
         viewIcon.className = 'bi bi-list';
     }
     isGridView = !isGridView;
+    
+    // Re-setup drag and drop after view change
+    setupFileDragAndDrop();
 }
 
 function deleteSelected() {
@@ -540,6 +734,22 @@ document.addEventListener('keydown', function(e) {
     
     if (e.key === 'Delete' && selectedFiles.size > 0) {
         deleteSelected();
+    }
+    
+    // Copy/Cut/Paste shortcuts
+    if (e.ctrlKey && e.key === 'c' && selectedFiles.size > 0) {
+        e.preventDefault();
+        copySelected();
+    }
+    
+    if (e.ctrlKey && e.key === 'x' && selectedFiles.size > 0) {
+        e.preventDefault();
+        cutSelected();
+    }
+    
+    if (e.ctrlKey && e.key === 'v' && clipboard.count > 0) {
+        e.preventDefault();
+        pasteItems();
     }
 });
 </script>

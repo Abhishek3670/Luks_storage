@@ -65,14 +65,20 @@
     <!-- Main Content -->
     <div class="main-content p-3">
         {% if is_mounted %}
-        <!-- Simple Breadcrumb Navigation -->
+        <!-- Breadcrumb Navigation -->
         <nav aria-label="breadcrumb">
             <ol class="breadcrumb">
                 <li class="breadcrumb-item">
                     <a href="/"><i class="bi bi-house"></i> Home</a>
                 </li>
                 {% if current_path %}
-                    <li class="breadcrumb-item active">{{ current_path }}</li>
+                    {% for part in current_path.split('/') %}
+                        {% if loop.last %}
+                            <li class="breadcrumb-item active">{{ part }}</li>
+                        {% else %}
+                            <li class="breadcrumb-item"><a href="/?path={{ current_path.split('/')[:loop.index] | join('/') }}">{{ part }}</a></li>
+                        {% endif %}
+                    {% endfor %}
                 {% endif %}
             </ol>
         </nav>
@@ -129,7 +135,7 @@
         <div id="fileList" class="list-view">
             {% if files %}
                 {% for file in files %}
-                <div class="file-item d-flex align-items-center p-2 border-bottom" data-name="{{ file.name|lower }}">
+                <div class="file-item" data-name="{{ file.name|lower }}">
                     <input type="checkbox" class="form-check-input me-2 file-checkbox" 
                            data-name="{{ file.name }}" data-path="{{ file.relative_path }}">
                     
@@ -225,11 +231,11 @@
                         <label for="fileInput" class="form-label">Select files to upload:</label>
                         <input type="file" class="form-control" id="fileInput" name="files" multiple>
                     </div>
-                    <div class="upload-drop-zone text-center p-4 border border-dashed border-secondary rounded" id="dropZone">
+                    <div class="upload-drop-zone text-center p-4 border border-dashed border-secondary rounded" id="uploadDropZone">
                         <i class="bi bi-cloud-upload fs-1 text-muted"></i>
                         <p class="mb-0">Drop files here to upload</p>
                     </div>
-                    <div class="mt-3" id="fileList"></div>
+                    <div class="mt-3" id="uploadFileList"></div>
                 </form>
             </div>
             <div class="modal-footer">
@@ -258,13 +264,13 @@
 <script>
 // Fast file operations optimized for old hardware
 let selectedFiles = new Set();
+let clipboard = { action: null, path: null };
 
 // Optimized search functionality
 function filterFiles() {
     const searchTerm = document.getElementById('searchFiles').value.toLowerCase();
     const fileItems = document.querySelectorAll('.file-item');
     
-    // Use requestAnimationFrame for smooth performance
     requestAnimationFrame(() => {
         fileItems.forEach(item => {
             const fileName = item.dataset.name;
@@ -319,19 +325,19 @@ function preventDefaults(e) {
 
 document.addEventListener('dragenter', function(e) {
     dragCounter++;
-    dropZone.classList.remove('d-none');
+    if(dropZone) dropZone.classList.remove('d-none');
 });
 
 document.addEventListener('dragleave', function(e) {
     dragCounter--;
     if (dragCounter === 0) {
-        dropZone.classList.add('d-none');
+        if(dropZone) dropZone.classList.add('d-none');
     }
 });
 
 document.addEventListener('drop', function(e) {
     dragCounter = 0;
-    dropZone.classList.add('d-none');
+    if(dropZone) dropZone.classList.add('d-none');
     
     const files = e.dataTransfer.files;
     if (files.length > 0) {
@@ -343,7 +349,7 @@ document.addEventListener('drop', function(e) {
 function handleFileUpload(files) {
     const fileInput = document.getElementById("fileInput");
     const uploadBtn = document.getElementById("uploadBtn");
-    const fileList = document.getElementById("fileList");
+    const fileList = document.getElementById("uploadFileList");
     
     // Clear previous files
     fileInput.files = files;
@@ -366,41 +372,38 @@ function handleFileUpload(files) {
 // Initialize upload modal functionality
 document.addEventListener("DOMContentLoaded", function() {
     const fileInput = document.getElementById("fileInput");
-    const dropZone = document.getElementById("dropZone");
+    const uploadDropZone = document.getElementById("uploadDropZone");
     const uploadForm = document.getElementById("uploadForm");
     const uploadBtn = document.getElementById("uploadBtn");
     
-    // File input change handler
     if (fileInput) {
         fileInput.addEventListener("change", function(e) {
             handleFileUpload(e.target.files);
         });
     }
     
-    // Drag and drop handlers
-    if (dropZone) {
-        dropZone.addEventListener("dragover", function(e) {
+    if (uploadDropZone) {
+        uploadDropZone.addEventListener("dragover", function(e) {
             e.preventDefault();
-            dropZone.classList.add("border-primary");
+            uploadDropZone.classList.add("border-primary");
         });
         
-        dropZone.addEventListener("dragleave", function(e) {
+        uploadDropZone.addEventListener("dragleave", function(e) {
             e.preventDefault();
-            dropZone.classList.remove("border-primary");
+            uploadDropZone.classList.remove("border-primary");
         });
         
-        dropZone.addEventListener("drop", function(e) {
+        uploadDropZone.addEventListener("drop", function(e) {
             e.preventDefault();
-            dropZone.classList.remove("border-primary");
+            uploadDropZone.classList.remove("border-primary");
             handleFileUpload(e.dataTransfer.files);
         });
         
-        dropZone.addEventListener("click", function() {
+        uploadDropZone.addEventListener("click", function() {
             fileInput.click();
         });
     }
     
-    // Upload button handler
     if (uploadBtn) {
         uploadBtn.addEventListener("click", function() {
             const formData = new FormData();
@@ -408,20 +411,16 @@ document.addEventListener("DOMContentLoaded", function() {
             
             if (files.length === 0) return;
             
-            // Add files to form data
             Array.from(files).forEach(file => {
                 formData.append("files", file);
             });
             
-            // Add current path
             const currentPath = new URLSearchParams(window.location.search).get("path") || "";
             formData.append("current_path", currentPath);
             
-            // Disable button and show loading
             uploadBtn.disabled = true;
             uploadBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Uploading...';
             
-            // Submit upload
             fetch("/upload", {
                 method: "POST",
                 body: formData
@@ -488,12 +487,29 @@ function toggleView() {
     
     if (isGridView) {
         fileList.className = 'list-view';
-        viewIcon.className = 'bi bi-list';
-        isGridView = false;
-    } else {
-        fileList.className = 'grid-view row';
         viewIcon.className = 'bi bi-grid-3x3-gap';
-        isGridView = true;
+    } else {
+        fileList.className = 'grid-view';
+        viewIcon.className = 'bi bi-list';
+    }
+    isGridView = !isGridView;
+}
+
+function deleteSelected() {
+    const currentPath = new URLSearchParams(window.location.search).get("path") || "";
+    if (confirm('Delete selected files?')) {
+        Promise.all(Array.from(selectedFiles).map(filePath => {
+            return fetch('/delete_json', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ item_name: filePath, current_path: currentPath })
+            });
+        }))
+        .then(() => {
+            clearSelection();
+            location.reload();
+        })
+        .catch(error => alert(`Error: ${error}`));
     }
 }
 
@@ -509,9 +525,7 @@ document.addEventListener('keydown', function(e) {
     }
     
     if (e.key === 'Delete' && selectedFiles.size > 0) {
-        if (confirm('Delete selected files?')) {
-            alert('Delete functionality would be implemented here');
-        }
+        deleteSelected();
     }
 });
 </script>

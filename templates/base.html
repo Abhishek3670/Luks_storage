@@ -49,9 +49,58 @@
         .progress-bar {
             height: 4px;
         }
-        /* Dark mode */
+        /* Grid view styles */
+        .grid-view {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        .grid-view .file-item {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 1rem;
+            text-align: center;
+            background: white;
+        }
+        .list-view .file-item {
+            display: flex;
+            align-items: center;
+        }
+        /* Dark mode improvements */
         [data-bs-theme="dark"] {
             color-scheme: dark;
+        }
+        [data-bs-theme="dark"] .file-item {
+            border-color: #444;
+            background: #2d2d2d;
+        }
+        [data-bs-theme="dark"] .file-item:hover {
+            background: #404040;
+        }
+        [data-bs-theme="dark"] .drag-zone {
+            background: #2d2d2d;
+            border-color: #555;
+        }
+        [data-bs-theme="dark"] .card {
+            background: #2d2d2d;
+            border-color: #444;
+        }
+        [data-bs-theme="dark"] .modal-content {
+            background: #2d2d2d;
+            border-color: #444;
+        }
+        [data-bs-theme="dark"] .form-control {
+            background: #404040;
+            border-color: #555;
+            color: #fff;
+        }
+        [data-bs-theme="dark"] .btn-outline-primary {
+            border-color: #0d6efd;
+            color: #0d6efd;
+        }
+        [data-bs-theme="dark"] .btn-outline-secondary {
+            border-color: #6c757d;
+            color: #6c757d;
         }
     </style>
 </head>
@@ -63,24 +112,33 @@
             </a>
             
             <div class="navbar-nav ms-auto d-flex flex-row">
-                {% if user and user.role == "admin" %}
-                <a class="nav-link me-3" href="/admin/users">
-                    <i class="bi bi-gear-fill"></i> Admin
-                </a>
+                {% if user %}
+                    {% if user.role == "admin" %}
+                    <a class="nav-link me-3" href="/admin/users">
+                        <i class="bi bi-gear-fill"></i> Admin
+                    </a>
+                    {% endif %}
+                    
+                    <div class="form-check form-switch me-3">
+                        <input class="form-check-input" type="checkbox" id="darkModeSwitch">
+                        <label class="form-check-label text-light" for="darkModeSwitch">
+                            <i class="bi bi-moon-fill"></i>
+                        </label>
+                    </div>
+                    
+                    <form action="/logout" method="POST" class="d-inline">
+                        <button type="submit" class="btn btn-outline-light btn-sm">
+                            <i class="bi bi-box-arrow-right"></i> Logout
+                        </button>
+                    </form>
+                {% else %}
+                    <div class="form-check form-switch me-3">
+                        <input class="form-check-input" type="checkbox" id="darkModeSwitch">
+                        <label class="form-check-label text-light" for="darkModeSwitch">
+                            <i class="bi bi-moon-fill"></i>
+                        </label>
+                    </div>
                 {% endif %}
-                
-                <div class="form-check form-switch me-3">
-                    <input class="form-check-input" type="checkbox" id="darkModeSwitch">
-                    <label class="form-check-label text-light" for="darkModeSwitch">
-                        <i class="bi bi-moon-fill"></i>
-                    </label>
-                </div>
-                
-                <form action="/logout" method="POST" class="d-inline">
-                    <button type="submit" class="btn btn-outline-light btn-sm">
-                        <i class="bi bi-box-arrow-right"></i> Logout
-                    </button>
-                </form>
             </div>
         </div>
     </nav>
@@ -110,13 +168,15 @@
         const savedTheme = localStorage.getItem('theme') || 'light';
         
         document.documentElement.setAttribute('data-bs-theme', savedTheme);
-        darkModeSwitch.checked = savedTheme === 'dark';
-        
-        darkModeSwitch.addEventListener('change', function() {
-            const theme = this.checked ? 'dark' : 'light';
-            document.documentElement.setAttribute('data-bs-theme', theme);
-            localStorage.setItem('theme', theme);
-        });
+        if (darkModeSwitch) {
+            darkModeSwitch.checked = savedTheme === 'dark';
+            
+            darkModeSwitch.addEventListener('change', function() {
+                const theme = this.checked ? 'dark' : 'light';
+                document.documentElement.setAttribute('data-bs-theme', theme);
+                localStorage.setItem('theme', theme);
+            });
+        }
     </script>
     
     {% block scripts %}{% endblock %}

@@ -81,22 +81,51 @@ struct DashboardQuery {
 }
 
 #[derive(Deserialize)]
+#[derive(Deserialize)]
 struct CreateFolderRequest {
-    folder_name: String,
+
+#[derive(Debug, MultipartForm)]
+struct UploadForm {
+    #[multipart(limit = "100MB")]
+    files: Vec<TempFile>,
+    current_path: actix_multipart::form::text::Text<String>,
+}
     current_path: String,
+
+#[derive(Debug, MultipartForm)]
+struct UploadForm {
+    #[multipart(limit = "100MB")]
+    files: Vec<TempFile>,
+    current_path: actix_multipart::form::text::Text<String>,
+}
+    folder_name: String,
+
+#[derive(Debug, MultipartForm)]
+struct UploadForm {
+    #[multipart(limit = "100MB")]
+    files: Vec<TempFile>,
+    current_path: actix_multipart::form::text::Text<String>,
+}
+}
+
+#[derive(Debug, MultipartForm)]
+struct UploadForm {
+    #[multipart(limit = "100MB")]
+    files: Vec<TempFile>,
+    current_path: actix_multipart::form::text::Text<String>,
 }
 
 #[derive(Deserialize)]
 struct RenameRequest {
+    current_path: String,
     old_name: String,
     new_name: String,
-    current_path: String,
 }
 
 #[derive(Deserialize)]
 struct DeleteRequest {
-    item_name: String,
     current_path: String,
+    item_name: String,
 }
 
 #[derive(Deserialize)]
@@ -111,12 +140,8 @@ struct DeleteUserRequest {
     user_id: i64,
 }
 
-#[derive(Debug, MultipartForm)]
-struct UploadForm {
-    #[multipart(limit = "100MB")]
-    files: Vec<TempFile>,
-    current_path: actix_multipart::form::text::Text<String>,
-}
+
+// --- HELPER FUNCTIONS ---
 async fn check_if_mounted(mount_point: &str) -> bool {
     let path = Path::new(mount_point);
     if !path.is_dir() { return false; }
@@ -442,22 +467,6 @@ async fn rename_item(app_state: web::Data<AppState>, form: web::Form<RenameReque
     HttpResponse::Found().insert_header((header::LOCATION, format!("/?path={}", form.current_path))).finish()
 }
 
-
-// JSON version of delete for bulk operations
-async fn delete_item_json(app_state: web::Data<AppState>, req: web::Json<DeleteRequest>) -> impl Responder {
-    let base_path = PathBuf::from(&app_state.config.mount_point);
-    let current_path = base_path.join(&req.current_path);
-    if !current_path.starts_with(&base_path) {
-        return HttpResponse::BadRequest().json("Invalid path.");
-    }
-    let item_path = current_path.join(&req.item_name);
-    let result = if item_path.is_dir() { fs::remove_dir_all(item_path).await } else { fs::remove_file(item_path).await };
-    match result {
-        Ok(_) => HttpResponse::Ok().json("Item deleted successfully."),
-        Err(e) => HttpResponse::InternalServerError().json(format!("Failed to delete item: {}", e)),
-    }
-}
-
 async fn delete_item(app_state: web::Data<AppState>, form: web::Form<DeleteRequest>) -> impl Responder {
     let base_path = PathBuf::from(&app_state.config.mount_point);
     let current_path = base_path.join(&form.current_path);
@@ -534,7 +543,6 @@ async fn main() -> std::io::Result<()> {
             .route("/upload", web::post().to(upload_files))
             .route("/rename", web::post().to(rename_item))
             .route("/delete", web::post().to(delete_item))
-            .route("/delete_json", web::post().to(delete_item_json))
             .route("/admin/users", web::get().to(show_admin_users))
             .route("/admin/users/add", web::get().to(show_add_user_form))
             .route("/admin/users/add", web::post().to(add_user))

@@ -1,0 +1,214 @@
+/* Custom optimizations for old hardware */
+* {
+    box-sizing: border-box;
+}
+
+/* Disable expensive animations on old hardware */
+*, *::before, *::after {
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+}
+
+/* Fast loading optimizations */
+.file-item {
+    contain: layout style;
+}
+
+.file-list {
+    contain: layout;
+}
+
+/* Virtual scrolling for large file lists */
+.file-container {
+    height: 500px;
+    overflow-y: auto;
+    will-change: transform;
+}
+
+/* Minimal shadows for better performance */
+.card {
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
+}
+
+/* Faster hover effects */
+.file-item:hover {
+    background-color: #f8f9fa;
+}
+
+/* Optimized drag zone */
+.drag-zone {
+    will-change: background-color, border-color;
+}
+
+/* Grid view styles */
+.grid-view {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+}
+
+.grid-view .file-item {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 1rem;
+    text-align: center;
+    background: white;
+    border-bottom: none;
+}
+
+.list-view .file-item {
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid #eee;
+}
+
+/* Quick theme switching - Dark Mode */
+[data-bs-theme="dark"] {
+    background-color: #121212;
+    color: #ffffff;
+}
+
+[data-bs-theme="dark"] .bg-light {
+    background-color: #1e1e1e !important;
+    color: #ffffff !important;
+}
+
+[data-bs-theme="dark"] .border-end {
+    border-color: #333 !important;
+}
+
+[data-bs-theme="dark"] .file-item {
+    border-color: #444;
+    background: #2d2d2d;
+    color: #ffffff;
+}
+
+[data-bs-theme="dark"] .file-item:hover {
+    background: #404040 !important;
+}
+
+[data-bs-theme="dark"] .drag-zone {
+    background: #2d2d2d;
+    border-color: #555;
+    color: #ffffff;
+}
+
+[data-bs-theme="dark"] .card {
+    background: #2d2d2d;
+    border-color: #444;
+    color: #ffffff;
+}
+
+[data-bs-theme="dark"] .card-header {
+    background: #404040 !important;
+    border-color: #444;
+}
+
+[data-bs-theme="dark"] .modal-content {
+    background: #2d2d2d;
+    border-color: #444;
+    color: #ffffff;
+}
+
+[data-bs-theme="dark"] .modal-header {
+    background: #404040;
+    border-color: #444;
+}
+
+[data-bs-theme="dark"] .form-control {
+    background: #404040;
+    border-color: #555;
+    color: #fff;
+}
+
+[data-bs-theme="dark"] .form-control:focus {
+    background: #404040;
+    border-color: #0d6efd;
+    color: #fff;
+    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25);
+}
+
+[data-bs-theme="dark"] .btn-outline-primary {
+    border-color: #0d6efd;
+    color: #0d6efd;
+}
+
+[data-bs-theme="dark"] .btn-outline-primary:hover {
+    background: #0d6efd;
+    color: #fff;
+}
+
+[data-bs-theme="dark"] .btn-outline-secondary {
+    border-color: #6c757d;
+    color: #6c757d;
+}
+
+[data-bs-theme="dark"] .btn-outline-secondary:hover {
+    background: #6c757d;
+    color: #fff;
+}
+
+[data-bs-theme="dark"] .btn-outline-success {
+    border-color: #198754;
+    color: #198754;
+}
+
+[data-bs-theme="dark"] .btn-outline-success:hover {
+    background: #198754;
+    color: #fff;
+}
+
+[data-bs-theme="dark"] .alert-info {
+    background: #1e3a5f;
+    border-color: #2e5984;
+    color: #b8daff;
+}
+
+[data-bs-theme="dark"] .breadcrumb {
+    color: #adb5bd;
+}
+
+[data-bs-theme="dark"] .breadcrumb-item + .breadcrumb-item::before {
+    color: #6c757d;
+}
+
+[data-bs-theme="dark"] .breadcrumb-item.active {
+    color: #ffffff;
+}
+
+[data-bs-theme="dark"] .text-muted {
+    color: #adb5bd !important;
+}
+
+[data-bs-theme="dark"] .border-bottom {
+    border-color: #444 !important;
+}
+
+/* Mobile optimizations */
+@media (max-width: 768px) {
+    .sidebar {
+        min-width: 100% !important;
+        position: sticky;
+        top: 56px;
+        z-index: 1000;
+    }
+    
+    .main-content {
+        padding: 1rem !important;
+    }
+    
+    .file-item {
+        padding: 12px 8px;
+    }
+    
+    .grid-view {
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    }
+}
+
+/* Print styles */
+@media print {
+    .sidebar, .navbar, .modal {
+        display: none !important;
+    }
+}

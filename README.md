@@ -1,381 +1,169 @@
 # LUKS Web Manager (Enhanced Edition)
 
-A modern, secure, and feature-rich self-hosted web interface for managing LUKS (Linux Unified Key Setup) encrypted drives, written in Rust. This application provides a clean, responsive UI to unlock, mount, browse files, and manage your encrypted storage remotely with advanced file management capabilities.
+A modern, secure, and feature-rich self-hosted web interface for managing LUKS (Linux Unified Key Setup) encrypted drives, written in Rust.
 
-## ✨ New Features & Enhancements
+## New Features and Enhancements
 
-### 🎨 **Modern User Interface**
-- **Clean, Minimal Design**: Intuitive and professional interface
-- **Responsive Layout**: Optimized for mobile, tablet, and desktop
-- **Dark/Light Mode Toggle**: Switch themes with persistent preference storage
-- **Bootstrap 5 Integration**: Modern UI components and icons
-- **Touch-Friendly Mobile UI**: Enhanced mobile experience
+### Modern User Interface
+- Clean and intuitive design.
+- Responsive layout optimized for various devices.
+- Dark/Light mode toggle with persistent preference.
 
-### 🗂️ **Advanced File Management**
-- **Drag-and-Drop Upload**: Visual drop zone with progress indicators
-- **Multi-File Operations**: Select multiple files for batch actions
-- **Right-Click Context Menu**: Quick access to file operations
-- **Advanced Search**: Real-time file filtering and search
-- **List/Grid View Toggle**: Multiple viewing options
-- **File Type Icons**: Visual file type identification
-- **Breadcrumb Navigation**: Easy directory traversal
+### Advanced File Management
+- Drag-and-drop uploads with progress indicators.
+- Multi-file operations: batch actions for selected files.
+- Right-click context menu for quick access to operations.
 
-### 📁 **File Operations**
-- **Batch Actions**: Move, delete, download multiple files
-- **File Preview**: Inline previews for images, text, and documents
-- **Download Management**: Single and multi-file downloads
-- **Folder Management**: Create, rename, and organize folders
-- **Quick Search**: Instant file and folder search
-- **Keyboard Shortcuts**: Ctrl+A (select all), Delete key support
+### Security Features
+- Secure Argon2 password hashing.
+- Session management with secure cookies.
+- Rate limiting for authentication attempts to prevent brute force attacks.
+- Configuration validation with comprehensive error logging.
 
-### ⚡ **Performance Optimizations**
-- **Offline Operation**: All assets served locally (no internet required)
-- **Fast Loading**: Optimized for older hardware
-- **Minimal Animations**: Disabled expensive transitions for better performance
-- **Efficient DOM Handling**: Optimized JavaScript for smooth operation
-- **Local Static Assets**: Bootstrap, icons, and scripts bundled locally
+## Core Features
 
-### 🔒 **Security Features**
-- **Secure User Management**: Argon2 password hashing
-- **Session Management**: Persistent login with secure cookies
-- **Access Control**: Role-based permissions (admin/user)
-- **File Access Protection**: Path traversal protection
-- **Secure Authentication**: Strong password requirements
+### LUKS Device Management
+- Remote control for unlocking and mounting encrypted devices.
+- Real-time status monitoring.
+- Automatic detection of system mount states.
 
----
+### Usage and Configuration
 
-## 🚀 Core Features
+#### HTTPS Configuration
+- Use Nginx or Apache as a reverse proxy for HTTPS.
 
-### **LUKS Device Management**
-- **Remote LUKS Control**: Unlock, mount, and lock encrypted devices
-- **Real-time Status**: Live mount status monitoring
-- **Automatic Detection**: Checks system mount state on startup
-- **Secure Password Input**: Protected LUKS password entry
+#### Rate Limiting
+- Configure rate limiting to protect endpoints from abuse.
 
-### **File Browser**
-- **Directory Navigation**: Browse mounted drive contents
-- **File Operations**: Create, rename, delete, move files and folders
-- **File Downloads**: Direct file download capability
-- **File Previews**: View files without downloading
-- **Upload Support**: Drag-and-drop file uploads
+#### Logging and Validation
+- Enhanced error handling with proper logging mechanisms.
 
-### **Admin Panel**
-- **User Management**: Create, list, and delete user accounts
-- **Role Management**: Admin and user role assignments
-- **System Overview**: Device and mount point information
-
----
-
-## 📋 Prerequisites
-
-Before you begin, ensure you have the following installed on your server:
-
-### **System Requirements**
-- **Operating System**: Linux (Ubuntu/Debian recommended)
-- **Hardware**: Minimum 512MB RAM, works on older hardware
-- **Network**: Can operate offline after initial setup
-
-### **Dependencies**
-- **Rust**: Install using rustup
-    ```bash
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-    source ~/.cargo/env
-    ```
-- **Build Tools**: Required for compilation
-    ```bash
-    sudo apt update
-    sudo apt install -y build-essential pkg-config libssl-dev
-    ```
-- **SQLx CLI**: Database management tool
-    ```bash
-    cargo install sqlx-cli --no-default-features --features sqlite
-    ```
-- **LUKS Tools**: Encryption utilities
-    ```bash
-    sudo apt install -y cryptsetup
-    ```
-
----
-
-## 🛠️ Installation & Setup
-
-### **1. Clone & Build**
-```bash
-git clone <your-repository-url>
-cd Luks_storage
-cargo build --release
-```
-
-### **2. Database Setup**
-```bash
-# Create database
-sqlx database create --database-url sqlite:luks_manager.db
-
-# Run migrations
-sqlx migrate run --database-url sqlite:luks_manager.db
-```
-
-### **3. System Configuration**
-
-#### **Configure Sudoers** (Required for LUKS operations)
-```bash
-sudo visudo
-```
-Add the following line (replace `your_username` with your actual username):
-```
-your_username ALL=(ALL) NOPASSWD: /usr/sbin/cryptsetup, /usr/bin/mount, /usr/bin/umount, /usr/bin/chown
-```
-
-#### **Environment Variables**
-Create a `.env` file or set environment variables:
-```env
-# LUKS Device Configuration
-LUKS_DEVICE_PATH=/dev/sdX1
-LUKS_MAPPER_NAME=luks_web_mapper
-LUKS_MOUNT_POINT=/mnt/luks_drive
-
-# Database Configuration
-DATABASE_URL=sqlite:luks_manager.db
-
-# Server Configuration (optional)
-RUST_LOG=info
-```
-
-### **4. Static Assets** (Already included)
-The application now includes all static assets locally:
-- Bootstrap CSS & JS
-- Bootstrap Icons
-- Custom optimizations
-
----
-
-## 🚀 Running the Application
-
-### **Development Mode**
-```bash
-RUST_LOG=info cargo run
-```
-
-### **Production Mode**
-```bash
-cargo build --release
-RUST_LOG=warn ./target/release/luks_web_manager
-```
-
-### **Background Service**
-```bash
-nohup ./target/release/luks_web_manager > luks_manager.log 2>&1 &
-```
-
-The application will be available at: **http://127.0.0.1:8080**
-
----
-
-## 👤 Default Credentials
-
-On first run, a default admin user is automatically created:
-- **Username**: `admin`
-- **Password**: `password`
-
-> ⚠️ **Important**: Change this password immediately after first login!
-
----
-
-## 🎮 Usage Guide
-
-### **Unlocking Your Device**
-1. Access the web interface
-2. Log in with your credentials
-3. Enter your LUKS password in the sidebar
-4. Click "Unlock & Mount"
-
-### **File Management**
-- **Upload Files**: Drag files onto the page or use the Upload button
-- **Select Multiple Files**: Use checkboxes for batch operations
-- **Search Files**: Use the search bar for quick filtering
-- **Navigation**: Click folders to navigate, use breadcrumbs to go back
-- **Preview Files**: Click the eye icon to preview files
-- **Download Files**: Click download icon or select multiple for batch download
-
-### **Keyboard Shortcuts**
-- **Ctrl+A**: Select all files
-- **Delete**: Delete selected files (with confirmation)
-- **Escape**: Clear selection
-
-### **Mobile Usage**
-- Touch-friendly interface
-- Responsive design adapts to screen size
-- Swipe gestures supported
-- Mobile-optimized file operations
-
----
-
-## 🔧 Configuration Options
-
-### **Performance Tuning**
-The application is optimized for older hardware:
-- Animations disabled for better performance
-- Efficient DOM handling
-- Minimal resource usage
-- Fast loading times
-
-### **Customization**
-- **Themes**: Light/Dark mode toggle
-- **Layout**: List/Grid view options
-- **File Display**: Customizable file type icons
-
----
-
-## 📂 Project Structure
-
-```
-Luks_storage/
-├── src/
-│   └── main.rs              # Main application code
-├── templates/
-│   ├── base.html            # Base template with modern UI
-│   ├── index.html           # Enhanced file browser
-│   ├── login.html           # Login interface
-│   ├── admin_users.html     # User management
-│   └── admin_user_form.html # User creation form
-├── static/                  # Local static assets
-│   ├── css/
-│   │   ├── bootstrap.min.css
-│   │   ├── bootstrap-icons.css
-│   │   └── custom.css       # Performance optimizations
-│   └── js/
-│       └── bootstrap.bundle.min.js
-├── migrations/              # Database migrations
-├── Cargo.toml              # Dependencies
-└── README.md               # This file
-```
-
----
-
-## 🛡️ Security Considerations
-
-### **Network Security**
-- Use HTTPS in production (reverse proxy recommended)
-- Firewall configuration to restrict access
-- VPN access for remote connections
-
-### **File Security**
-- Regular backups of encrypted data
-- Strong LUKS passwords
-- Secure key management
-
-### **Application Security**
-- Regular password changes
-- User access monitoring
-- Log file monitoring
-
----
-
-## 🚀 Performance Features
-
-### **Offline Operation**
-- All assets served locally
-- No external dependencies
-- Works without internet connection
-
-### **Optimized for Older Hardware**
-- Minimal system resource usage
-- Fast loading times
-- Efficient memory management
-- Disabled expensive animations
-
-### **Mobile Optimization**
-- Touch-friendly interface
-- Responsive design
-- Optimized for mobile browsers
-
----
-
-## 🛠️ Troubleshooting
-
-### **Common Issues**
-
-#### **Permission Denied Errors**
-```bash
-# Check sudoers configuration
-sudo visudo
-
-# Verify device permissions
-ls -la /dev/your-device
-```
-
-#### **Database Connection Issues**
-```bash
-# Recreate database if corrupted
-rm luks_manager.db
-sqlx database create --database-url sqlite:luks_manager.db
-sqlx migrate run --database-url sqlite:luks_manager.db
-```
-
-#### **Static Assets Not Loading**
-```bash
-# Verify static files exist
-ls -la static/css/
-ls -la static/js/
-
-# Re-download if missing
-curl -o static/css/bootstrap.min.css https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css
-```
-
-### **Performance Issues**
-- Ensure adequate RAM (minimum 512MB)
-- Check disk space on mount point
-- Monitor system logs for errors
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit pull requests, report bugs, or suggest new features.
-
-### **Development Setup**
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
----
-
-## 📄 License
+## License
 
 This project is open source. Please check the license file for details.
 
----
+## 🔧 Latest Updates & Fixes
 
-## 🎯 Roadmap
+### **File Upload Fix (v0.1.1)**
+- **✅ Fixed**: Cross-device link error when uploading files
+- **✅ Added**: Authentication requirement for file uploads  
+- **✅ Enhanced**: Better error handling and logging for uploads
+- **✅ Improved**: Upload destination validation
 
-### **Planned Features**
-- [ ] File versioning and rollback
-- [ ] ZIP/TAR archive support
-- [ ] Online document editing
-- [ ] Real-time file sync
-- [ ] Advanced user permissions
-- [ ] API endpoints for automation
-- [ ] Backup and restore functionality
-- [ ] Multi-language support
+### **Upload Improvements:**
+- **Cross-filesystem Support**: Now uses file copying instead of moving to avoid "Invalid cross-device link" errors
+- **Authentication Required**: Users must be logged in to upload files
+- **Better Error Messages**: Clear feedback when LUKS device is not mounted
+- **Enhanced Logging**: Detailed upload success/failure logs
+- **Path Validation**: Prevents directory traversal attacks
 
-### **Performance Improvements**
-- [ ] Virtual scrolling for large directories
-- [ ] Background file operations
-- [ ] Caching optimizations
-- [ ] Database performance tuning
+### **Testing Upload Functionality:**
+1. **Start the server**: `cargo run`
+2. **Login** via web interface (admin/password)
+3. **Mount LUKS device** (if using real LUKS storage)
+4. **Upload files** via drag-and-drop or upload button
 
----
-
-## 📞 Support
-
-If you encounter any issues or have questions:
-1. Check the troubleshooting section
-2. Review the logs for error messages
-3. Ensure all prerequisites are installed
-4. Verify LUKS device configuration
+### **For Testing Without LUKS:**
+```bash
+export LUKS_MOUNT_POINT=/tmp/test_uploads
+mkdir -p /tmp/test_uploads
+cargo run
+```
 
 ---
 
-**Enjoy your secure, fast, and modern LUKS file management experience!** 🔒✨
+
+## 🔧 Multiple File Upload Fix (v0.1.2)
+
+### **✅ Fixed Issues:**
+- **Multiple File Selection**: Now properly handles selecting multiple files
+- **Frontend Response Handling**: Fixed JavaScript to handle 302 redirects correctly  
+- **File List Preservation**: Uses DataTransfer API to maintain file selections
+- **Enhanced Debugging**: Added console logs for upload tracking
+
+### **🛠️ Technical Improvements:**
+- **JavaScript FormData**: Improved multiple file handling in frontend
+- **Response Processing**: Fixed handling of server redirects (302 status)
+- **File Input Management**: Better preservation of selected files using DataTransfer API
+- **Error Handling**: Enhanced error reporting with detailed console logs
+
+### **📋 Multiple Upload Features:**
+- ✅ **Drag and Drop**: Select multiple files via drag-and-drop
+- ✅ **File Picker**: Use Ctrl+click or Shift+click to select multiple files
+- ✅ **Progress Feedback**: Shows upload progress and file count
+- ✅ **Error Recovery**: Proper error handling and user feedback
+- ✅ **Debug Console**: Detailed logging for troubleshooting
+
+### **🧪 Testing Multiple File Upload:**
+1. **Start server**: `cargo run`
+2. **Login**: Use admin/password
+3. **Select multiple files**: 
+   - Use file picker with Ctrl+click
+   - Or drag multiple files to upload zone
+4. **Upload**: Click "Upload" button
+5. **Verify**: Check console for detailed upload logs
+
+### **🔍 Debug Information:**
+The upload now provides detailed console logs:
+```
+Uploading 3 files:
+File 1: document.pdf (245.2 KB)
+File 2: image.jpg (892.1 KB)  
+File 3: data.csv (45.8 KB)
+Upload response status: 302
+Upload successful
+```
+
+---
+
+
+## 🔧 Multiple File Deletion Fix (v0.1.3)
+
+### **✅ Issue Resolved:**
+- **Missing Endpoint**: Added `/delete_json` endpoint for multiple file deletions
+- **Frontend Integration**: Frontend can now successfully delete multiple selected files
+- **Authentication**: JSON delete endpoint includes proper authentication checks
+- **Error Handling**: Detailed error messages and success confirmations
+
+### **🛠️ Technical Implementation:**
+- **New Endpoint**: `/delete_json` - JSON API for deleting individual files
+- **Batch Processing**: Frontend sends multiple simultaneous requests for selected files
+- **Security**: Path validation and authentication checks for each deletion
+- **Logging**: Detailed logging for successful and failed deletions
+
+### **📋 Multiple Deletion Features:**
+- ✅ **Select Multiple Files**: Use checkboxes to select files/folders
+- ✅ **Batch Delete**: Delete multiple items with single "Delete Selected" action
+- ✅ **Progress Feedback**: Shows deletion progress and results
+- ✅ **Error Recovery**: Individual file errors don't stop other deletions
+- ✅ **Confirmation Dialog**: Asks for confirmation before deleting
+
+### **🔍 How It Works:**
+1. **Frontend**: User selects multiple files with checkboxes
+2. **Confirmation**: System asks "Delete X selected file(s)?"
+3. **Batch Processing**: Sends individual DELETE requests for each file
+4. **Result**: Shows success/failure count for the operation
+
+### **🧪 Testing Multiple File Deletion:**
+1. **Start server**: `cargo run`
+2. **Login**: Use admin/password
+3. **Select files**: Check multiple file checkboxes
+4. **Delete**: Click "Delete Selected" button
+5. **Verify**: Check logs for individual deletion confirmations
+
+### **📊 API Response Format:**
+```json
+{
+  "success": true,
+  "message": "Deleted filename.txt"
+}
+```
+
+### **🔒 Security Features:**
+- **Authentication Required**: Must be logged in to delete files
+- **Path Validation**: Prevents deletion outside mount point
+- **Individual Validation**: Each file deletion is separately validated
+- **Detailed Logging**: All deletion attempts are logged with results
+
+---
+

@@ -1,8 +1,85 @@
 # LUKS Web Manager (Enhanced Edition)
 
-A modern, secure, and feature-rich self-hosted web interface for managing LUKS (Linux Unified Key Setup) encrypted drives, written in Rust.
+A modern, secure, and feature-rich self-hosted web interface for managing LUKS (Linux Unified Key Setup) encrypted drives, written in Rust. This project provides a responsive web UI for encrypted device management, user authentication, and advanced file operations, all with strong security best practices.
 
-## New Features and Enhancements
+---
+
+## Application Flow Diagram
+
+```mermaid
+flowchart TD
+    A[User] -->|Login| B(Login Page)
+    B -->|POST /login| C{Auth Success?}
+    C -- No --> B
+    C -- Yes --> D[Session Created]
+    D --> E[Dashboard]
+    E -->|Unlock| F[POST /unlock]
+    F -->|LUKS Unlocked| G[File Browser]
+    E -->|Lock| H[POST /lock]
+    G -->|Upload/Download/Delete| I[File Operations]
+    G -->|Admin| J[User Management]
+    J -->|Add/Delete User| K[DB Update]
+    I -->|DB/File System| L[(LUKS Device)]
+```
+
+---
+
+## Core Data Structures/Class Diagram
+
+```mermaid
+classDiagram
+    class AppState {
+        +is_mounted: Arc<Mutex<bool>>
+        +config: Config
+        +db: SqlitePool
+        +tera: Tera
+    }
+    class Config {
+        +device_path: String
+        +mapper_name: String
+        +mount_point: String
+    }
+    class User {
+        +id: i64
+        +username: String
+        +password_hash: String
+        +role: String
+    }
+    AppState --> Config
+    AppState --> User
+    AppState --> Tera
+    AppState --> SqlitePool
+    User <|-- Admin
+    User <|-- Viewer
+    User <|-- Editor
+```
+
+---
+
+## Version History
+
+### v0.1.3
+- Added `/delete_json` endpoint for multiple file deletions
+- Frontend can now delete multiple selected files
+- Authentication and path validation for each deletion
+- Detailed logging for all deletion attempts
+
+### v0.1.2
+- Improved multiple file upload support (drag-and-drop, file picker)
+- Fixed frontend response handling for uploads
+- Enhanced error handling and debugging for uploads
+
+### v0.1.1
+- Fixed cross-device link error for uploads
+- Authentication required for file uploads
+- Improved upload destination validation and error feedback
+
+### v0.1.0
+- Initial release: LUKS device management, user authentication, file browser, admin panel, and security features
+
+---
+
+# New Features and Enhancements
 
 ### Modern User Interface
 - Clean and intuitive design.

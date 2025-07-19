@@ -1,0 +1,144 @@
+<!-- Modal-optimized Edit User Form -->
+<form action="/admin/users/edit/{{ edit_user.id }}" method="post" id="editUserForm">
+    <div class="row g-3">
+        <div class="col-12">
+            <label for="edit_username" class="form-label fw-semibold">
+                <i class="bi bi-person me-1"></i>Username
+            </label>
+            <input type="text" 
+                   id="edit_username" 
+                   name="username" 
+                   value="{{ edit_user.username }}" 
+                   class="form-control" 
+                   readonly>
+            <div class="form-text">Username cannot be changed</div>
+        </div>
+
+        <div class="col-12">
+            <label for="edit_password" class="form-label fw-semibold">
+                <i class="bi bi-key me-1"></i>New Password
+            </label>
+            <div class="input-group">
+                <input type="password" 
+                       id="edit_password" 
+                       name="password" 
+                       class="form-control" 
+                       placeholder="Leave blank to keep current password">
+                <button class="btn btn-outline-secondary" 
+                        type="button" 
+                        id="togglePassword"
+                        aria-label="Toggle password visibility">
+                    <i class="bi bi-eye" id="togglePasswordIcon"></i>
+                </button>
+            </div>
+            <div class="form-text">Minimum 6 characters required if changing password</div>
+        </div>
+
+        <div class="col-12">
+            <label for="edit_role" class="form-label fw-semibold">
+                <i class="bi bi-shield-check me-1"></i>Role
+            </label>
+            <select name="role" id="edit_role" class="form-select">
+                <option value="admin" {% if edit_user.role == 'admin' %}selected{% endif %}>
+                    <i class="bi bi-shield-fill-check"></i> Administrator
+                </option>
+                <option value="editor" {% if edit_user.role == 'editor' %}selected{% endif %}>
+                    <i class="bi bi-pencil-square"></i> Editor  
+                </option>
+                <option value="viewer" {% if edit_user.role == 'viewer' %}selected{% endif %}>
+                    <i class="bi bi-eye"></i> Viewer
+                </option>
+            </select>
+        </div>
+
+
+    </div>
+
+    <input type="hidden" name="user_id" value="{{ edit_user.id }}">
+    
+    <!-- Modal Footer with Actions -->
+    <div class="modal-footer border-top mt-4 px-0">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+            <i class="bi bi-x-circle me-1"></i>Cancel
+        </button>
+        <button type="submit" class="btn btn-primary">
+            <i class="bi bi-check-circle me-1"></i>Update User
+        </button>
+    </div>
+</form>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Password visibility toggle
+    const togglePassword = document.getElementById('togglePassword');
+    const passwordField = document.getElementById('edit_password');
+    const toggleIcon = document.getElementById('togglePasswordIcon');
+    
+    if (togglePassword) {
+        togglePassword.addEventListener('click', function() {
+            const type = passwordField.getAttribute('type') === 'password' ? 'text' : 'password';
+            passwordField.setAttribute('type', type);
+            
+            if (type === 'password') {
+                toggleIcon.className = 'bi bi-eye';
+            } else {
+                toggleIcon.className = 'bi bi-eye-slash';
+            }
+        });
+    }
+
+    // Form submission handling
+    const form = document.getElementById('editUserForm');
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            const password = document.getElementById('edit_password').value;
+            
+            // Basic password validation if changing password
+            if (password && password.length < 6) {
+                e.preventDefault();
+                alert('Password must be at least 6 characters long.');
+                return false;
+            }
+            
+            // Add loading state
+            const submitBtn = form.querySelector('button[type="submit"]');
+            const originalText = submitBtn.innerHTML;
+            submitBtn.innerHTML = '<i class="bi bi-arrow-clockwise spinner-border spinner-border-sm me-1"></i>Updating...';
+            submitBtn.disabled = true;
+            
+            // Re-enable button after a timeout in case of errors
+            setTimeout(function() {
+                submitBtn.innerHTML = originalText;
+                submitBtn.disabled = false;
+            }, 5000);
+        });
+    }
+});
+</script>
+
+<style>
+.spinner-border-sm {
+    animation: spinner-border 0.75s linear infinite;
+}
+
+@keyframes spinner-border {
+    to { transform: rotate(360deg); }
+}
+
+.form-text {
+    font-size: 0.875em;
+}
+
+.card.bg-light {
+    background-color: #f8f9fa !important;
+}
+
+[data-bs-theme="dark"] .card.bg-light {
+    background-color: #2d2d2d !important;
+    border-color: #444 !important;
+}
+
+[data-bs-theme="dark"] .form-text {
+    color: #adb5bd !important;
+}
+</style>

@@ -249,12 +249,19 @@ async fn show_admin_users(
     let mut context = Context::new();
     context.insert("users", &users);
     context.insert("current_user_id", &user.id);
+    context.insert("user", &user);
     context.insert("search_term", &search);
     HttpResponse::Ok().content_type("text/html").body(app_state.tera.render("admin_users.html", &context).unwrap())
 }
 
-async fn show_add_user_form(app_state: web::Data<AppState>) -> impl Responder {
-    HttpResponse::Ok().content_type("text/html").body(app_state.tera.render("admin_user_form.html", &Context::new()).unwrap())
+async fn show_add_user_form(session: Session, app_state: web::Data<AppState>) -> impl Responder {
+    let user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
+    };
+    let mut context = Context::new();
+    context.insert("user", &user);
+    HttpResponse::Ok().content_type("text/html").body(app_state.tera.render("admin_user_form.html", &context).unwrap())
 }
 
 async fn add_user(form: web::Form<AddUserRequest>, app_state: web::Data<AppState>) -> impl Responder {
@@ -315,7 +322,7 @@ async fn show_edit_user_form(
         _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
     };
     // Select all columns to match User struct
-    let user = match sqlx::query_as::<_, User>("SELECT id, username, password_hash, role FROM users WHERE id = ?")
+    let user = match sqlx::query_as::<_, User>("SELECT id, username, password_hash, role, last_login FROM users WHERE id = ?")
         .bind(user_id)
         .fetch_one(&app_state.db)
         .await {
@@ -328,6 +335,7 @@ async fn show_edit_user_form(
     let mut context = Context::new();
     context.insert("edit_user", &user);
     context.insert("current_user", &current_user);
+    context.insert("user", &current_user);
     HttpResponse::Ok().body(app_state.tera.render("admin_user_edit.html", &context).unwrap())
 }
 
@@ -390,7 +398,7 @@ async fn edit_user(
 
 
 async fn login(form: web::Form<LoginRequest>, session: Session, app_state: web::Data<AppState>) -> impl Responder {
-    let user = match sqlx::query_as::<_, User>("SELECT id, username, password_hash, role FROM users WHERE username = ?")
+    let user = match sqlx::query_as::<_, User>("SELECT id, username, password_hash, role, last_login FROM users WHERE username = ?")
         .bind(&form.username).fetch_optional(&app_state.db).await {
             Ok(Some(user)) => user,
             _ => {
@@ -400,7 +408,7 @@ async fn login(form: web::Form<LoginRequest>, session: Session, app_state: web::
         };
 
     if verify_password(&user.password_hash, &form.password) {
-        session.insert("user", user).unwrap();
+        session.insert("user", &user).unwrap();
         // Update last_login for the user
         sqlx::query("UPDATE users SET last_login = datetime('now') WHERE id = ?")
             .bind(user.id)

@@ -113,6 +113,9 @@
             
             <div class="navbar-nav ms-auto d-flex flex-row">
                 {% if user %}
+                    <a class="nav-link me-3" href="/">
+                        <i class="bi bi-speedometer2"></i> Dashboard
+                    </a>
                     {% if user.role == "admin" %}
                     <a class="nav-link me-3" href="/admin/users">
                         <i class="bi bi-gear-fill"></i> Admin

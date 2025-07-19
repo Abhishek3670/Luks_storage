@@ -135,6 +135,33 @@ struct EditUserRequest {
     role: String,
 }
 
+#[derive(Deserialize)]
+struct AddPermissionRequest {
+    user_id: i64,
+    can_read: bool,
+    can_write: bool,
+    can_delete: bool,
+    can_share: bool,
+}
+
+#[derive(Deserialize)]
+struct DeletePermissionRequest {
+    user_id: i64,
+}
+
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct Permission {
+    pub id: i64,
+    pub user_id: i64,
+    pub path: String,
+    pub can_read: bool,
+    pub can_write: bool,
+    pub can_delete: bool,
+    pub can_share: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug, MultipartForm)]
 struct UploadForm {
     #[multipart(limit = "100MB")]
@@ -450,18 +477,117 @@ async fn edit_user(
     HttpResponse::Found().insert_header((header::LOCATION, "/admin/users")).finish()
 }
 
+// Show admin permissions page
+async fn show_admin_permissions(
+    session: Session,
+    app_state: web::Data<AppState>,
+    flash_messages: IncomingFlashMessages,
+) -> impl Responder {
+    let user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
+    };
+
+    // Get all permissions with user information (only root path)
+    let permissions = sqlx::query_as::<_, Permission>(
+        "SELECT p.id, p.user_id, p.path, p.can_read, p.can_write, p.can_delete, p.can_share, p.created_at, p.updated_at 
+         FROM permissions p 
+         WHERE p.path = '/'
+         ORDER BY p.user_id"
+    )
+    .fetch_all(&app_state.db)
+    .await
+    .unwrap_or_default();
+
+    // Get all users for the dropdown
+    let users = sqlx::query_as::<_, User>(
+        "SELECT id, username, password_hash, role, last_login FROM users ORDER BY username"
+    )
+    .fetch_all(&app_state.db)
+    .await
+    .unwrap_or_default();
+
+    let mut context = Context::new();
+    context.insert("permissions", &permissions);
+    context.insert("users", &users);
+    context.insert("user", &user);
+    let messages: Vec<FlashMessage> = flash_messages.iter().cloned().collect();
+    context.insert("messages", &messages);
+    
+    HttpResponse::Ok().content_type("text/html").body(app_state.tera.render("admin_permissions.html", &context).unwrap())
+}
+
+// Add new permission
+async fn add_permission(
+    session: Session,
+    app_state: web::Data<AppState>,
+    form: web::Form<AddPermissionRequest>,
+) -> impl Responder {
+    let _user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
+    };
+
+    match sqlx::query!(
+        "INSERT INTO permissions (user_id, path, can_read, can_write, can_delete, can_share, created_at, updated_at) \
+         VALUES (?, '/', ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) \
+         ON CONFLICT(user_id, path) DO UPDATE SET can_read=excluded.can_read, can_write=excluded.can_write, can_delete=excluded.can_delete, can_share=excluded.can_share, updated_at=CURRENT_TIMESTAMP",
+        form.user_id, form.can_read, form.can_write, form.can_delete, form.can_share
+    )
+    .execute(&app_state.db)
+    .await
+    {
+        Ok(_) => FlashMessage::success("Permission added/updated successfully.").send(),
+        Err(e) => FlashMessage::error(format!("Failed to add permission: {}", e)).send(),
+    }
+    
+    HttpResponse::Found().insert_header((header::LOCATION, "/admin/permissions")).finish()
+}
+
+// Delete permission
+async fn delete_permission(
+    session: Session,
+    app_state: web::Data<AppState>,
+    form: web::Form<DeletePermissionRequest>,
+) -> impl Responder {
+    let _user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
+    };
+
+    match sqlx::query("DELETE FROM permissions WHERE user_id = ? AND path = '/'")
+        .bind(form.user_id)
+        .execute(&app_state.db)
+        .await
+    {
+        Ok(_) => FlashMessage::success("Permission deleted successfully.").send(),
+        Err(e) => FlashMessage::error(format!("Failed to delete permission: {}", e)).send(),
+    }
+    
+    HttpResponse::Found().insert_header((header::LOCATION, "/admin/permissions")).finish()
+}
 
 async fn login(form: web::Form<LoginRequest>, session: Session, app_state: web::Data<AppState>) -> impl Responder {
+    log::info!("Login attempt for user: {}", form.username);
+    
     let user = match sqlx::query_as::<_, User>("SELECT id, username, password_hash, role, last_login FROM users WHERE username = ?")
         .bind(&form.username).fetch_optional(&app_state.db).await {
-            Ok(Some(user)) => user,
+            Ok(Some(user)) => {
+                log::info!("User found: {}", user.username);
+                user
+            },
             _ => {
+                log::warn!("User not found: {}", form.username);
                 FlashMessage::warning("Invalid credentials.").send();
                 return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish();
             }
         };
 
-    if verify_password(&user.password_hash, &form.password) {
+    log::info!("Verifying password for user: {}", user.username);
+    let password_valid = verify_password(&user.password_hash, &form.password);
+    log::info!("Password verification result: {}", password_valid);
+    
+    if password_valid {
         session.insert("user", &user).unwrap();
         // Update last_login for the user
         sqlx::query("UPDATE users SET last_login = datetime('now') WHERE id = ?")
@@ -470,8 +596,10 @@ async fn login(form: web::Form<LoginRequest>, session: Session, app_state: web::
             .await
             .ok();
         FlashMessage::info("Login successful!").send();
+        log::info!("Login successful for user: {}", user.username);
         HttpResponse::Found().insert_header((header::LOCATION, "/")).finish()
     } else {
+        log::warn!("Password verification failed for user: {}", user.username);
         FlashMessage::warning("Invalid credentials.").send();
         HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish()
     }
@@ -935,6 +1063,9 @@ async fn main() -> std::io::Result<()> {
             .route("/admin/users/bulk-delete", web::post().to(bulk_delete_users))
             .route("/admin/users/edit/{user_id}", web::get().to(show_edit_user_form))
             .route("/admin/users/edit/{user_id}", web::post().to(edit_user))
+            .route("/admin/permissions", web::get().to(show_admin_permissions))
+            .route("/admin/permissions/add", web::post().to(add_permission))
+            .route("/admin/permissions/delete", web::post().to(delete_permission))
             .route("/admin/api/server-health", web::get().to(server_health_api))
             .route("/admin/server-health", web::get().to(show_server_health_dashboard))
             .service(Files::new("/static", "./static").show_files_listing())

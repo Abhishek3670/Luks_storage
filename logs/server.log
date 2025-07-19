@@ -1,0 +1,24 @@
+=== Server started at Sat Jul 19 08:59:02 PM UTC 2025 ===
+[2025-07-19T20:59:02Z INFO  luks_web_manager] No users found in database. Creating default admin user...
+[2025-07-19T20:59:02Z INFO  luks_web_manager] Default admin user created with password: 'password'
+[2025-07-19T20:59:02Z INFO  luks_web_manager] Path /tmp/luks_test exists but is not a mount point.
+[2025-07-19T20:59:03Z INFO  luks_web_manager] Starting server at http://127.0.0.1:8081
+[2025-07-19T20:59:03Z INFO  actix_server::builder] starting 4 workers
+[2025-07-19T20:59:03Z INFO  actix_server::server] Actix runtime found; starting in Actix runtime
+[2025-07-19T20:59:03Z INFO  actix_server::server] starting service: "actix-web-service-127.0.0.1:8081", workers: 4, listening on: 127.0.0.1:8081
+[2025-07-19T20:59:22Z WARN  actix_session::middleware] The session cookie attached to the incoming request failed to pass cryptographic checks (signature verification/decryption).
+[2025-07-19T20:59:22Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET /login HTTP/1.1" 200 5855 "http://127.0.0.1:8081/login" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0" 0.000265
+[2025-07-19T20:59:23Z WARN  actix_session::middleware] The session cookie attached to the incoming request failed to pass cryptographic checks (signature verification/decryption).
+[2025-07-19T20:59:23Z INFO  actix_web::middleware::logger] 127.0.0.1 "POST /login HTTP/1.1" 302 0 "http://127.0.0.1:8081/login" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0" 0.000909
+[2025-07-19T20:59:23Z WARN  actix_session::middleware] The session cookie attached to the incoming request failed to pass cryptographic checks (signature verification/decryption).
+[2025-07-19T20:59:23Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET /login HTTP/1.1" 200 5855 "http://127.0.0.1:8081/login" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0" 0.000311
+[2025-07-19T20:59:24Z WARN  actix_session::middleware] The session cookie attached to the incoming request failed to pass cryptographic checks (signature verification/decryption).
+[2025-07-19T20:59:24Z INFO  actix_web::middleware::logger] 127.0.0.1 "POST /login HTTP/1.1" 302 0 "http://127.0.0.1:8081/login" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0" 0.000899
+[2025-07-19T20:59:24Z WARN  actix_session::middleware] The session cookie attached to the incoming request failed to pass cryptographic checks (signature verification/decryption).
+[2025-07-19T20:59:24Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET /login HTTP/1.1" 200 5855 "http://127.0.0.1:8081/login" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0" 0.000132
+[2025-07-19T20:59:24Z WARN  actix_session::middleware] The session cookie attached to the incoming request failed to pass cryptographic checks (signature verification/decryption).
+[2025-07-19T20:59:24Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET /login HTTP/1.1" 200 5855 "http://127.0.0.1:8081/login" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0" 0.000208
+[2025-07-19T20:59:25Z WARN  actix_session::middleware] The session cookie attached to the incoming request failed to pass cryptographic checks (signature verification/decryption).
+[2025-07-19T20:59:25Z INFO  actix_web::middleware::logger] 127.0.0.1 "POST /login HTTP/1.1" 302 0 "http://127.0.0.1:8081/login" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0" 0.000986
+[2025-07-19T20:59:25Z WARN  actix_session::middleware] The session cookie attached to the incoming request failed to pass cryptographic checks (signature verification/decryption).
+[2025-07-19T20:59:25Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET /login HTTP/1.1" 200 5855 "http://127.0.0.1:8081/login" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36 Edg/138.0.0.0" 0.000189

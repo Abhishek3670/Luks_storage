@@ -682,7 +682,7 @@ async fn main() -> std::io::Result<()> {
         tera: tera,
     };
 
-    log::info!("Starting server at http://127.0.0.1:8080");
+    log::info!("Starting server at http://127.0.0.1:8081");
 
     HttpServer::new(move || {
         let session_mw = SessionMiddleware::new(CookieSessionStore::default(), secret_key.clone());
@@ -714,7 +714,7 @@ async fn main() -> std::io::Result<()> {
             .route("/admin/users/delete", web::post().to(delete_user))
             .service(Files::new("/static", "./static").show_files_listing())
     })
-    .bind(("127.0.0.1", 8080))?
+    .bind(("127.0.0.1", 8081))?
     .run()
     .await
 }

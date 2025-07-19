@@ -43,6 +43,7 @@
                                 <th>ID</th>
                                 <th>Username</th>
                                 <th>Role</th>
+                                <th>Last Login</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
@@ -57,6 +58,13 @@
                                 <td>{{ user.id }}</td>
                                 <td>{{ user.username }}</td>
                                 <td><span class="badge bg-secondary">{{ user.role | capitalize }}</span></td>
+                                <td>
+                                    {% if user.last_login %}
+                                        {{ user.last_login }}
+                                    {% else %}
+                                        <span class="text-muted">Never</span>
+                                    {% endif %}
+                                </td>
                                 <td>
                                     <a href="#" class="btn btn-sm btn-outline-primary edit-user-btn" data-user-id="{{ user.id }}">Edit</a>
                                     <!-- Enable delete button, but not for the current user -->

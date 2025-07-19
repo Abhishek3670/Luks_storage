@@ -62,13 +62,13 @@ struct UnlockRequest {
     luks_password: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-struct User {
-    id: i64,
-    username: String,
-    #[serde(skip)]
-    password_hash: String,
-    role: String,
+#[derive(Debug, Clone, Deserialize, Serialize, sqlx::FromRow)]
+pub struct User {
+    pub id: i64,
+    pub username: String,
+    pub password_hash: String,
+    pub role: String,
+    pub last_login: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -231,18 +231,20 @@ async fn show_admin_users(
     let search = query.get("q").map(|s| s.trim().to_lowercase()).unwrap_or_default();
     let users = if !search.is_empty() {
         sqlx::query_as::<_, User>(
-            "SELECT id, username, password_hash, role FROM users WHERE LOWER(username) LIKE ? OR LOWER(role) LIKE ? ORDER BY username"
+            "SELECT id, username, password_hash, role, last_login FROM users WHERE lower(username) LIKE ? OR lower(role) LIKE ? ORDER BY COALESCE(last_login, '1970-01-01T00:00:00Z') DESC"
         )
         .bind(format!("%{}%", search))
         .bind(format!("%{}%", search))
         .fetch_all(&app_state.db)
         .await
-        .unwrap_or_else(|_| vec![])
+        .unwrap_or_default()
     } else {
-        sqlx::query_as::<_, User>("SELECT id, username, password_hash, role FROM users ORDER BY username")
-            .fetch_all(&app_state.db)
-            .await
-            .unwrap_or_else(|_| vec![])
+        sqlx::query_as::<_, User>(
+            "SELECT id, username, password_hash, role, last_login FROM users ORDER BY COALESCE(last_login, '1970-01-01T00:00:00Z') DESC"
+        )
+        .fetch_all(&app_state.db)
+        .await
+        .unwrap_or_default()
     };
     let mut context = Context::new();
     context.insert("users", &users);
@@ -399,6 +401,12 @@ async fn login(form: web::Form<LoginRequest>, session: Session, app_state: web::
 
     if verify_password(&user.password_hash, &form.password) {
         session.insert("user", user).unwrap();
+        // Update last_login for the user
+        sqlx::query("UPDATE users SET last_login = datetime('now') WHERE id = ?")
+            .bind(user.id)
+            .execute(&app_state.db)
+            .await
+            .ok();
         FlashMessage::info("Login successful!").send();
         HttpResponse::Found().insert_header((header::LOCATION, "/")).finish()
     } else {

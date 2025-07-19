@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+  <h2>Server Health</h2>
+  <div id="health-status" class="row g-3">
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title">Uptime</h5>
+          <p class="card-text" id="uptime">Loading...</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title">Server Time</h5>
+          <p class="card-text" id="server_time">Loading...</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title">Memory Usage</h5>
+          <p class="card-text" id="memory">Loading...</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card">
+        <div class="card-body">
+          <h5 class="card-title">CPU Usage</h5>
+          <p class="card-text" id="cpu_usage">Loading...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+function formatBytes(bytes) {
+  if (bytes >= 1024 * 1024 * 1024) {
+    return (bytes / (1024 * 1024 * 1024)).toFixed(1) + " GB";
+  } else if (bytes >= 1024 * 1024) {
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  } else if (bytes >= 1024) {
+    return (bytes / 1024).toFixed(1) + " KB";
+  } else {
+    return bytes + " B";
+  }
+}
+function formatUptime(seconds) {
+  const d = Math.floor(seconds / (3600*24));
+  seconds  -= d*3600*24;
+  const h = Math.floor(seconds / 3600);
+  seconds  -= h*3600;
+  const m = Math.floor(seconds / 60);
+  seconds  -= m*60;
+  return `${d}d ${h}h ${m}m ${seconds}s`;
+}
+function updateHealth() {
+  fetch("/admin/api/server-health", { credentials: "same-origin" }).then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }).then(data => {
+    document.getElementById('uptime').textContent = formatUptime(data.uptime);
+    document.getElementById('server_time').textContent = data.server_time;
+    document.getElementById('memory').textContent = `Used: ${formatBytes(data.memory.used)} / ${formatBytes(data.memory.total)} | Swap: ${formatBytes(data.memory.used_swap)} / ${formatBytes(data.memory.total_swap)}`;
+    document.getElementById('cpu_usage').textContent = `${data.cpu_usage.toFixed(1)}%`;
+  }).catch(() => {
+    document.getElementById('health-status').innerHTML = '<div class="alert alert-danger">Failed to fetch server health.</div>';
+  });
+}
+updateHealth();
+setInterval(updateHealth, 5000);
+</script>
+{% endblock %} 

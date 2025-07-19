@@ -1,4 +1,5 @@
 use actix_multipart::{form::{tempfile::TempFile, MultipartForm}};
+use sysinfo::System;
 use actix_files::Files;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder, http::header, Error};
 use actix_web::web::Query;
@@ -16,7 +17,7 @@ use tokio::process::Command;
 use tokio::fs;
 use mime_guess::from_path;
 use std::os::unix::fs::MetadataExt;
-use sqlx::{SqlitePool, FromRow};
+use sqlx::SqlitePool;
 use argon2::{
     password_hash::{rand_core, PasswordHasher, PasswordVerifier, SaltString},
     Argon2
@@ -845,6 +846,8 @@ async fn main() -> std::io::Result<()> {
             .route("/admin/users/bulk-delete", web::post().to(bulk_delete_users))
             .route("/admin/users/edit/{user_id}", web::get().to(show_edit_user_form))
             .route("/admin/users/edit/{user_id}", web::post().to(edit_user))
+            .route("/admin/api/server-health", web::get().to(server_health_api))
+            .route("/admin/server-health", web::get().to(show_server_health_dashboard))
             .service(Files::new("/static", "./static").show_files_listing())
     })
     .bind(("127.0.0.1", 8081))?
@@ -966,4 +969,61 @@ async fn bulk_delete_users(
     };
 
     HttpResponse::Ok().json(response)
+}
+
+async fn server_health_api(session: Session, app_state: web::Data<AppState>) -> impl Responder {
+    // Only allow admin
+    let _user = match session.get::<User>("user") {
+        Ok(Some(user)) if user.role == "admin" => user,
+        _ => return HttpResponse::Unauthorized().json(serde_json::json!({"error": "Unauthorized"})),
+    };
+
+    let mut sys = System::new_all();
+    sys.refresh_all();
+    let uptime = System::uptime();
+    let total_memory = sys.total_memory();
+    let used_memory = sys.used_memory();
+    let total_swap = sys.total_swap();
+    let used_swap = sys.used_swap();
+    
+    // Get CPU usage
+    let cpu_usage = sys.global_cpu_usage();
+    
+    // Get disk usage
+    let disks: Vec<serde_json::Value> = vec![];
+    
+    let now = chrono::Utc::now().to_rfc3339();
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "uptime": uptime,
+        "server_time": now,
+        "memory": {
+            "total": total_memory,
+            "used": used_memory,
+            "total_swap": total_swap,
+            "used_swap": used_swap
+        },
+        "cpu_usage": cpu_usage,
+        "disks": disks
+    }))
+}
+
+
+// Handler to render the server health dashboard page
+async fn show_server_health_dashboard(session: Session, app_state: web::Data<AppState>) -> impl Responder {
+    let _user = match session.get::<User>("user") {
+        Ok(Some(user)) if user.role == "admin" => user,
+        _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
+    };
+
+    let mut context = Context::new();
+    context.insert("current_page", "server_health");
+    
+    match app_state.tera.render("admin_server_health.html", &context) {
+        Ok(rendered) => HttpResponse::Ok().content_type("text/html").body(rendered),
+        Err(err) => {
+            log::error!("Template error: {}", err);
+            HttpResponse::InternalServerError().body("Template error")
+        }
+    }
 }

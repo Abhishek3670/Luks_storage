@@ -29,13 +29,34 @@
             </div>
         </div>
         
-        <div class="card shadow-sm">
+                <!-- Bulk Actions Toolbar -->
+        <div class="card mb-3 bg-light">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center">
+                        <input type="checkbox" id="selectAll" class="form-check-input me-2">
+                        <label for="selectAll" class="form-label mb-0">Select All</label>
+                        <span id="selectedCount" class="badge bg-primary ms-2" style="display: none;">0 selected</span>
+                    </div>
+                    <div id="bulkActions" style="display: none;">
+                        <button id="bulkDeleteBtn" class="btn btn-danger btn-sm">
+                            <i class="bi bi-trash"></i> Delete Selected
+                        </button>
+                        <button id="clearSelection" class="btn btn-outline-secondary btn-sm ms-1">
+                            Clear Selection
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+<div class="card shadow-sm">
             <div class="card-body">
                 <div class="table-responsive">
                     <table class="table table-striped">
                         <thead>
                             <tr>
-                                <th>ID</th>
+                                <th width="50"><input type="checkbox" id="selectAllHeader" class="form-check-input"></th><th>ID</th>
                                 <th>Username</th>
                                 <th>Role</th>
                                 <th>Last Login</th>
@@ -50,7 +71,7 @@
                             {% else %}
                             {% for user in users %}
                             <tr>
-                                <td>{{ user.id }}</td>
+                                <td><input type="checkbox" class="user-checkbox form-check-input" value="{{ user.id }}" data-username="{{ user.username }}"></td><td>{{ user.id }}</td>
                                 <td>{{ user.username }}</td>
                                 <td><span class="badge bg-secondary">{{ user.role | capitalize }}</span></td>
                                 <td>
@@ -162,6 +183,95 @@ document.addEventListener('DOMContentLoaded', function() {
               e.preventDefault();
               handleFormSubmission(form);
             });
+
+  // Bulk Actions JavaScript
+  const updateSelectedCount = () => {
+    const count = document.querySelectorAll('.user-checkbox:checked').length;
+    const selectedCountSpan = document.getElementById('selectedCount');
+    const bulkActionsDiv = document.getElementById('bulkActions');
+
+    if (count > 0) {
+      selectedCountSpan.textContent = count + ' selected';
+      selectedCountSpan.style.display = 'inline';
+      bulkActionsDiv.style.display = 'block';
+    } else {
+      selectedCountSpan.style.display = 'none';
+      bulkActionsDiv.style.display = 'none';
+    }
+  };
+
+  // Handle select all checkboxes
+  const selectAll = document.getElementById('selectAll');
+  if (selectAll) {
+    selectAll.addEventListener('change', function() {
+      const checkboxes = document.querySelectorAll('.user-checkbox');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAll.checked;
+      });
+      updateSelectedCount();
+    });
+  }
+
+  const selectAllHeader = document.getElementById('selectAllHeader');
+  if (selectAllHeader) {
+    selectAllHeader.addEventListener('change', function() {
+      const checkboxes = document.querySelectorAll('.user-checkbox');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAllHeader.checked;
+      });
+      if (selectAll) selectAll.checked = selectAllHeader.checked;
+      updateSelectedCount();
+    });
+  }
+
+  // Handle individual checkbox changes
+  document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+    checkbox.addEventListener('change', updateSelectedCount);
+  });
+
+  // Handle bulk delete
+  const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+  if (bulkDeleteBtn) {
+    bulkDeleteBtn.addEventListener('click', function() {
+      const selectedIds = Array.from(document.querySelectorAll('.user-checkbox:checked')).map(cb => parseInt(cb.value));
+
+      if (selectedIds.length > 0 && confirm(`Are you sure you want to delete ${selectedIds.length} selected user(s)? This action cannot be undone.`)) {
+        fetch('/admin/users/bulk-delete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ user_ids: selectedIds })
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            alert(data.message);
+            window.location.reload();
+          } else {
+            alert('Failed to delete users: ' + data.message);
+          }
+        })
+        .catch(error => {
+          console.error('Error deleting users:', error);
+          alert('An error occurred while deleting users.');
+        });
+      }
+    });
+  }
+
+  // Handle clear selection
+  const clearSelectionBtn = document.getElementById('clearSelection');
+  if (clearSelectionBtn) {
+    clearSelectionBtn.addEventListener('click', function() {
+      document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+        checkbox.checked = false;
+      });
+      if (selectAll) selectAll.checked = false;
+      if (selectAllHeader) selectAllHeader.checked = false;
+      updateSelectedCount();
+    });
+  }
           }
         })
         .catch(function(error) {
@@ -199,8 +309,275 @@ document.addEventListener('DOMContentLoaded', function() {
           errorDiv.appendChild(refreshBtn);
           modalBody.appendChild(errorDiv);
         });
+
+  // Bulk Actions JavaScript
+  const updateSelectedCount = () => {
+    const count = document.querySelectorAll('.user-checkbox:checked').length;
+    const selectedCountSpan = document.getElementById('selectedCount');
+    const bulkActionsDiv = document.getElementById('bulkActions');
+
+    if (count > 0) {
+      selectedCountSpan.textContent = count + ' selected';
+      selectedCountSpan.style.display = 'inline';
+      bulkActionsDiv.style.display = 'block';
+    } else {
+      selectedCountSpan.style.display = 'none';
+      bulkActionsDiv.style.display = 'none';
+    }
+  };
+
+  // Handle select all checkboxes
+  const selectAll = document.getElementById('selectAll');
+  if (selectAll) {
+    selectAll.addEventListener('change', function() {
+      const checkboxes = document.querySelectorAll('.user-checkbox');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAll.checked;
+      });
+      updateSelectedCount();
     });
+  }
+
+  const selectAllHeader = document.getElementById('selectAllHeader');
+  if (selectAllHeader) {
+    selectAllHeader.addEventListener('change', function() {
+      const checkboxes = document.querySelectorAll('.user-checkbox');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAllHeader.checked;
+      });
+      if (selectAll) selectAll.checked = selectAllHeader.checked;
+      updateSelectedCount();
+    });
+  }
+
+  // Handle individual checkbox changes
+  document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+    checkbox.addEventListener('change', updateSelectedCount);
   });
+
+  // Handle bulk delete
+  const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+  if (bulkDeleteBtn) {
+    bulkDeleteBtn.addEventListener('click', function() {
+      const selectedIds = Array.from(document.querySelectorAll('.user-checkbox:checked')).map(cb => parseInt(cb.value));
+
+      if (selectedIds.length > 0 && confirm(`Are you sure you want to delete ${selectedIds.length} selected user(s)? This action cannot be undone.`)) {
+        fetch('/admin/users/bulk-delete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ user_ids: selectedIds })
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            alert(data.message);
+            window.location.reload();
+          } else {
+            alert('Failed to delete users: ' + data.message);
+          }
+        })
+        .catch(error => {
+          console.error('Error deleting users:', error);
+          alert('An error occurred while deleting users.');
+        });
+      }
+    });
+  }
+
+  // Handle clear selection
+  const clearSelectionBtn = document.getElementById('clearSelection');
+  if (clearSelectionBtn) {
+    clearSelectionBtn.addEventListener('click', function() {
+      document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+        checkbox.checked = false;
+      });
+      if (selectAll) selectAll.checked = false;
+      if (selectAllHeader) selectAllHeader.checked = false;
+      updateSelectedCount();
+    });
+  }
+    });
+
+  // Bulk Actions JavaScript
+  const updateSelectedCount = () => {
+    const count = document.querySelectorAll('.user-checkbox:checked').length;
+    const selectedCountSpan = document.getElementById('selectedCount');
+    const bulkActionsDiv = document.getElementById('bulkActions');
+
+    if (count > 0) {
+      selectedCountSpan.textContent = count + ' selected';
+      selectedCountSpan.style.display = 'inline';
+      bulkActionsDiv.style.display = 'block';
+    } else {
+      selectedCountSpan.style.display = 'none';
+      bulkActionsDiv.style.display = 'none';
+    }
+  };
+
+  // Handle select all checkboxes
+  const selectAll = document.getElementById('selectAll');
+  if (selectAll) {
+    selectAll.addEventListener('change', function() {
+      const checkboxes = document.querySelectorAll('.user-checkbox');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAll.checked;
+      });
+      updateSelectedCount();
+    });
+  }
+
+  const selectAllHeader = document.getElementById('selectAllHeader');
+  if (selectAllHeader) {
+    selectAllHeader.addEventListener('change', function() {
+      const checkboxes = document.querySelectorAll('.user-checkbox');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAllHeader.checked;
+      });
+      if (selectAll) selectAll.checked = selectAllHeader.checked;
+      updateSelectedCount();
+    });
+  }
+
+  // Handle individual checkbox changes
+  document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+    checkbox.addEventListener('change', updateSelectedCount);
+  });
+
+  // Handle bulk delete
+  const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+  if (bulkDeleteBtn) {
+    bulkDeleteBtn.addEventListener('click', function() {
+      const selectedIds = Array.from(document.querySelectorAll('.user-checkbox:checked')).map(cb => parseInt(cb.value));
+
+      if (selectedIds.length > 0 && confirm(`Are you sure you want to delete ${selectedIds.length} selected user(s)? This action cannot be undone.`)) {
+        fetch('/admin/users/bulk-delete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ user_ids: selectedIds })
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            alert(data.message);
+            window.location.reload();
+          } else {
+            alert('Failed to delete users: ' + data.message);
+          }
+        })
+        .catch(error => {
+          console.error('Error deleting users:', error);
+          alert('An error occurred while deleting users.');
+        });
+      }
+    });
+  }
+
+  // Handle clear selection
+  const clearSelectionBtn = document.getElementById('clearSelection');
+  if (clearSelectionBtn) {
+    clearSelectionBtn.addEventListener('click', function() {
+      document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+        checkbox.checked = false;
+      });
+      if (selectAll) selectAll.checked = false;
+      if (selectAllHeader) selectAllHeader.checked = false;
+      updateSelectedCount();
+    });
+  }
+  });
+
+  // Bulk Actions JavaScript
+  const updateSelectedCount = () => {
+    const count = document.querySelectorAll('.user-checkbox:checked').length;
+    const selectedCountSpan = document.getElementById('selectedCount');
+    const bulkActionsDiv = document.getElementById('bulkActions');
+
+    if (count > 0) {
+      selectedCountSpan.textContent = count + ' selected';
+      selectedCountSpan.style.display = 'inline';
+      bulkActionsDiv.style.display = 'block';
+    } else {
+      selectedCountSpan.style.display = 'none';
+      bulkActionsDiv.style.display = 'none';
+    }
+  };
+
+  // Handle select all checkboxes
+  const selectAll = document.getElementById('selectAll');
+  if (selectAll) {
+    selectAll.addEventListener('change', function() {
+      const checkboxes = document.querySelectorAll('.user-checkbox');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAll.checked;
+      });
+      updateSelectedCount();
+    });
+  }
+
+  const selectAllHeader = document.getElementById('selectAllHeader');
+  if (selectAllHeader) {
+    selectAllHeader.addEventListener('change', function() {
+      const checkboxes = document.querySelectorAll('.user-checkbox');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAllHeader.checked;
+      });
+      if (selectAll) selectAll.checked = selectAllHeader.checked;
+      updateSelectedCount();
+    });
+  }
+
+  // Handle individual checkbox changes
+  document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+    checkbox.addEventListener('change', updateSelectedCount);
+  });
+
+  // Handle bulk delete
+  const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+  if (bulkDeleteBtn) {
+    bulkDeleteBtn.addEventListener('click', function() {
+      const selectedIds = Array.from(document.querySelectorAll('.user-checkbox:checked')).map(cb => parseInt(cb.value));
+
+      if (selectedIds.length > 0 && confirm(`Are you sure you want to delete ${selectedIds.length} selected user(s)? This action cannot be undone.`)) {
+        fetch('/admin/users/bulk-delete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ user_ids: selectedIds })
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            alert(data.message);
+            window.location.reload();
+          } else {
+            alert('Failed to delete users: ' + data.message);
+          }
+        })
+        .catch(error => {
+          console.error('Error deleting users:', error);
+          alert('An error occurred while deleting users.');
+        });
+      }
+    });
+  }
+
+  // Handle clear selection
+  const clearSelectionBtn = document.getElementById('clearSelection');
+  if (clearSelectionBtn) {
+    clearSelectionBtn.addEventListener('click', function() {
+      document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+        checkbox.checked = false;
+      });
+      if (selectAll) selectAll.checked = false;
+      if (selectAllHeader) selectAllHeader.checked = false;
+      updateSelectedCount();
+    });
+  }
   
 
   // Function to show success message in modal
@@ -272,7 +649,185 @@ document.addEventListener('DOMContentLoaded', function() {
       submitBtn.disabled = false;
       alert('Failed to update user. Please try again.');
     });
+
+  // Bulk Actions JavaScript
+  const updateSelectedCount = () => {
+    const count = document.querySelectorAll('.user-checkbox:checked').length;
+    const selectedCountSpan = document.getElementById('selectedCount');
+    const bulkActionsDiv = document.getElementById('bulkActions');
+
+    if (count > 0) {
+      selectedCountSpan.textContent = count + ' selected';
+      selectedCountSpan.style.display = 'inline';
+      bulkActionsDiv.style.display = 'block';
+    } else {
+      selectedCountSpan.style.display = 'none';
+      bulkActionsDiv.style.display = 'none';
+    }
+  };
+
+  // Handle select all checkboxes
+  const selectAll = document.getElementById('selectAll');
+  if (selectAll) {
+    selectAll.addEventListener('change', function() {
+      const checkboxes = document.querySelectorAll('.user-checkbox');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAll.checked;
+      });
+      updateSelectedCount();
+    });
+  }
+
+  const selectAllHeader = document.getElementById('selectAllHeader');
+  if (selectAllHeader) {
+    selectAllHeader.addEventListener('change', function() {
+      const checkboxes = document.querySelectorAll('.user-checkbox');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAllHeader.checked;
+      });
+      if (selectAll) selectAll.checked = selectAllHeader.checked;
+      updateSelectedCount();
+    });
+  }
+
+  // Handle individual checkbox changes
+  document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+    checkbox.addEventListener('change', updateSelectedCount);
+  });
+
+  // Handle bulk delete
+  const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+  if (bulkDeleteBtn) {
+    bulkDeleteBtn.addEventListener('click', function() {
+      const selectedIds = Array.from(document.querySelectorAll('.user-checkbox:checked')).map(cb => parseInt(cb.value));
+
+      if (selectedIds.length > 0 && confirm(`Are you sure you want to delete ${selectedIds.length} selected user(s)? This action cannot be undone.`)) {
+        fetch('/admin/users/bulk-delete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ user_ids: selectedIds })
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            alert(data.message);
+            window.location.reload();
+          } else {
+            alert('Failed to delete users: ' + data.message);
+          }
+        })
+        .catch(error => {
+          console.error('Error deleting users:', error);
+          alert('An error occurred while deleting users.');
+        });
+      }
+    });
+  }
+
+  // Handle clear selection
+  const clearSelectionBtn = document.getElementById('clearSelection');
+  if (clearSelectionBtn) {
+    clearSelectionBtn.addEventListener('click', function() {
+      document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+        checkbox.checked = false;
+      });
+      if (selectAll) selectAll.checked = false;
+      if (selectAllHeader) selectAllHeader.checked = false;
+      updateSelectedCount();
+    });
+  }
   }
 });
+
+  // Bulk Actions JavaScript
+  const updateSelectedCount = () => {
+    const count = document.querySelectorAll('.user-checkbox:checked').length;
+    const selectedCountSpan = document.getElementById('selectedCount');
+    const bulkActionsDiv = document.getElementById('bulkActions');
+
+    if (count > 0) {
+      selectedCountSpan.textContent = count + ' selected';
+      selectedCountSpan.style.display = 'inline';
+      bulkActionsDiv.style.display = 'block';
+    } else {
+      selectedCountSpan.style.display = 'none';
+      bulkActionsDiv.style.display = 'none';
+    }
+  };
+
+  // Handle select all checkboxes
+  const selectAll = document.getElementById('selectAll');
+  if (selectAll) {
+    selectAll.addEventListener('change', function() {
+      const checkboxes = document.querySelectorAll('.user-checkbox');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAll.checked;
+      });
+      updateSelectedCount();
+    });
+  }
+
+  const selectAllHeader = document.getElementById('selectAllHeader');
+  if (selectAllHeader) {
+    selectAllHeader.addEventListener('change', function() {
+      const checkboxes = document.querySelectorAll('.user-checkbox');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAllHeader.checked;
+      });
+      if (selectAll) selectAll.checked = selectAllHeader.checked;
+      updateSelectedCount();
+    });
+  }
+
+  // Handle individual checkbox changes
+  document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+    checkbox.addEventListener('change', updateSelectedCount);
+  });
+
+  // Handle bulk delete
+  const bulkDeleteBtn = document.getElementById('bulkDeleteBtn');
+  if (bulkDeleteBtn) {
+    bulkDeleteBtn.addEventListener('click', function() {
+      const selectedIds = Array.from(document.querySelectorAll('.user-checkbox:checked')).map(cb => parseInt(cb.value));
+
+      if (selectedIds.length > 0 && confirm(`Are you sure you want to delete ${selectedIds.length} selected user(s)? This action cannot be undone.`)) {
+        fetch('/admin/users/bulk-delete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ user_ids: selectedIds })
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success) {
+            alert(data.message);
+            window.location.reload();
+          } else {
+            alert('Failed to delete users: ' + data.message);
+          }
+        })
+        .catch(error => {
+          console.error('Error deleting users:', error);
+          alert('An error occurred while deleting users.');
+        });
+      }
+    });
+  }
+
+  // Handle clear selection
+  const clearSelectionBtn = document.getElementById('clearSelection');
+  if (clearSelectionBtn) {
+    clearSelectionBtn.addEventListener('click', function() {
+      document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+        checkbox.checked = false;
+      });
+      if (selectAll) selectAll.checked = false;
+      if (selectAllHeader) selectAllHeader.checked = false;
+      updateSelectedCount();
+    });
+  }
 </script>
 {% endblock %}

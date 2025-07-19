@@ -842,6 +842,7 @@ async fn main() -> std::io::Result<()> {
             .route("/admin/users/add", web::get().to(show_add_user_form))
             .route("/admin/users/add", web::post().to(add_user))
             .route("/admin/users/delete", web::post().to(delete_user))
+            .route("/admin/users/bulk-delete", web::post().to(bulk_delete_users))
             .route("/admin/users/edit/{user_id}", web::get().to(show_edit_user_form))
             .route("/admin/users/edit/{user_id}", web::post().to(edit_user))
             .service(Files::new("/static", "./static").show_files_listing())
@@ -849,4 +850,120 @@ async fn main() -> std::io::Result<()> {
     .bind(("127.0.0.1", 8081))?
     .run()
     .await
+}
+
+// Simple bulk delete endpoint
+async fn bulk_delete_users(
+    session: Session,
+    app_state: web::Data<AppState>,
+    form: web::Json<serde_json::Value>,
+) -> impl Responder {
+    // Check if user is logged in and is admin
+    let current_user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Unauthorized().json(serde_json::json!({
+            "success": false,
+            "message": "Authentication required"
+        })),
+    };
+
+    if current_user.role != "admin" {
+        return HttpResponse::Forbidden().json(serde_json::json!({
+            "success": false,
+            "message": "Admin privileges required."
+        }));
+    }
+
+    let user_ids = match form.get("user_ids") {
+        Some(ids) => match ids.as_array() {
+            Some(arr) => arr.iter().filter_map(|v| v.as_i64()).collect::<Vec<_>>(),
+            None => {
+                return HttpResponse::BadRequest().json(serde_json::json!({
+                    "success": false,
+                    "message": "Invalid user_ids format."
+                }));
+            }
+        },
+        None => {
+            return HttpResponse::BadRequest().json(serde_json::json!({
+                "success": false,
+                "message": "Missing user_ids."
+            }));
+        }
+    };
+
+    let mut deleted_count = 0;
+    let mut errors = Vec::new();
+
+    for user_id in &user_ids {
+        // Prevent deleting current user
+        if *user_id == current_user.id {
+            errors.push(format!("Cannot delete current user (ID: {})", user_id));
+            continue;
+        }
+
+        // Get user details
+        let user = match sqlx::query_as::<_, User>("SELECT id, username, password_hash, role, last_login FROM users WHERE id = ?")
+            .bind(user_id)
+            .fetch_optional(&app_state.db)
+            .await {
+                Ok(Some(user)) => user,
+                Ok(None) => {
+                    errors.push(format!("User ID {} not found", user_id));
+                    continue;
+                },
+                Err(e) => {
+                    errors.push(format!("Database error for user ID {}: {}", user_id, e));
+                    continue;
+                }
+            };
+
+        // If deleting an admin, check if there are other admins
+        if user.role == "admin" {
+            let admin_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+                .fetch_one(&app_state.db)
+                .await
+                .unwrap_or(0);
+            if admin_count <= 1 {
+                errors.push(format!("Cannot delete the last admin user: {}", user.username));
+                continue;
+            }
+        }
+
+        // Delete the user
+        match sqlx::query("DELETE FROM users WHERE id = ?")
+            .bind(user_id)
+            .execute(&app_state.db)
+            .await {
+                Ok(_) => {
+                    deleted_count += 1;
+                    log::info!("User {} (ID: {}) deleted by admin {}", user.username, user_id, current_user.username);
+                },
+                Err(e) => {
+                    errors.push(format!("Failed to delete user ID {}: {}", user_id, e));
+                }
+            }
+    }
+
+    let response = if deleted_count > 0 {
+        let message = if errors.is_empty() {
+            format!("Successfully deleted {} user(s)", deleted_count)
+        } else {
+            format!("Deleted {} user(s). Errors: {}", deleted_count, errors.join(", "))
+        };
+        serde_json::json!({
+            "success": true,
+            "message": message,
+            "deleted_count": deleted_count,
+            "errors": errors
+        })
+    } else {
+        serde_json::json!({
+            "success": false,
+            "message": format!("No users were deleted. Errors: {}", errors.join(", ")),
+            "errors": errors
+        })
+    };
+
+    HttpResponse::Ok().json(response)
 }

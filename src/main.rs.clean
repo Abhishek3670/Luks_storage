@@ -1,6 +1,7 @@
 use actix_multipart::{form::{tempfile::TempFile, MultipartForm}};
 use actix_files::Files;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder, http::header, Error};
+use actix_web::web::Query;
 use actix_session::{Session, SessionMiddleware, storage::CookieSessionStore};
 use actix_web_flash_messages::{FlashMessage, IncomingFlashMessages, FlashMessagesFramework};
 use std::sync::{Arc, Mutex};
@@ -20,6 +21,8 @@ use argon2::{
     password_hash::{rand_core, PasswordHasher, PasswordVerifier, SaltString},
     Argon2
 };
+use std::collections::HashMap;
+use log::debug;
 
 // --- 1. Configuration & State ---
 #[derive(Clone, Serialize)]
@@ -59,13 +62,26 @@ struct UnlockRequest {
     luks_password: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
-struct User {
-    id: i64,
-    username: String,
-    #[serde(skip)]
-    password_hash: String,
-    role: String,
+#[derive(Debug, Clone, Deserialize, Serialize, sqlx::FromRow)]
+pub struct User {
+#[derive(Debug, Serialize, FromRow)]
+pub struct AuditLog {
+    pub id: i64,
+    pub user_id: Option<i64>,
+    pub username: String,
+    pub action: String,
+    pub resource_type: Option<String>,
+    pub resource_id: Option<String>,
+    pub details: Option<String>,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+    pub created_at: String,
+}
+    pub id: i64,
+    pub username: String,
+    pub password_hash: String,
+    pub role: String,
+    pub last_login: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -122,6 +138,13 @@ struct AddUserRequest {
 #[derive(Deserialize)]
 struct DeleteUserRequest {
     user_id: i64,
+}
+
+#[derive(Deserialize)]
+struct EditUserRequest {
+    user_id: i64,
+    password: Option<String>,
+    role: String,
 }
 
 #[derive(Debug, MultipartForm)]
@@ -208,23 +231,50 @@ async fn show_login_form(app_state: web::Data<AppState>) -> impl Responder {
     HttpResponse::Ok().content_type("text/html").body(app_state.tera.render("login.html", &Context::new()).unwrap())
 }
 
-async fn show_admin_users(session: Session, app_state: web::Data<AppState>) -> impl Responder {
+// Update show_admin_users to support search
+async fn show_admin_users(
+    session: Session,
+    app_state: web::Data<AppState>,
+    query: Query<HashMap<String, String>>,
+) -> impl Responder {
     let user = match session.get::<User>("user") {
         Ok(Some(user)) => user,
         _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
     };
-
-    let users = sqlx::query_as::<_, User>("SELECT id, username, password_hash, role FROM users ORDER BY username")
-        .fetch_all(&app_state.db).await.unwrap_or_else(|_| vec![]);
-
+    let search = query.get("q").map(|s| s.trim().to_lowercase()).unwrap_or_default();
+    let users = if !search.is_empty() {
+        sqlx::query_as::<_, User>(
+            "SELECT id, username, password_hash, role, last_login FROM users WHERE lower(username) LIKE ? OR lower(role) LIKE ? ORDER BY COALESCE(last_login, '1970-01-01T00:00:00Z') DESC"
+        )
+        .bind(format!("%{}%", search))
+        .bind(format!("%{}%", search))
+        .fetch_all(&app_state.db)
+        .await
+        .unwrap_or_default()
+    } else {
+        sqlx::query_as::<_, User>(
+            "SELECT id, username, password_hash, role, last_login FROM users ORDER BY COALESCE(last_login, '1970-01-01T00:00:00Z') DESC"
+        )
+        .fetch_all(&app_state.db)
+        .await
+        .unwrap_or_default()
+    };
     let mut context = Context::new();
     context.insert("users", &users);
     context.insert("current_user_id", &user.id);
+    context.insert("user", &user);
+    context.insert("search_term", &search);
     HttpResponse::Ok().content_type("text/html").body(app_state.tera.render("admin_users.html", &context).unwrap())
 }
 
-async fn show_add_user_form(app_state: web::Data<AppState>) -> impl Responder {
-    HttpResponse::Ok().content_type("text/html").body(app_state.tera.render("admin_user_form.html", &Context::new()).unwrap())
+async fn show_add_user_form(session: Session, app_state: web::Data<AppState>) -> impl Responder {
+    let user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
+    };
+    let mut context = Context::new();
+    context.insert("user", &user);
+    HttpResponse::Ok().content_type("text/html").body(app_state.tera.render("admin_user_form.html", &context).unwrap())
 }
 
 async fn add_user(form: web::Form<AddUserRequest>, app_state: web::Data<AppState>) -> impl Responder {
@@ -272,9 +322,96 @@ async fn delete_user(session: Session, form: web::Form<DeleteUserRequest>, app_s
     HttpResponse::Found().insert_header((header::LOCATION, "/admin/users")).finish()
 }
 
+// Show edit user form
+async fn show_edit_user_form(
+    session: Session,
+    app_state: web::Data<AppState>,
+    path: web::Path<i64>
+) -> impl Responder {
+    let user_id = path.into_inner();
+    debug!("Edit handler: Looking up user_id: {}", user_id);
+    let current_user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
+    };
+    // Select all columns to match User struct
+    let user = match sqlx::query_as::<_, User>("SELECT id, username, password_hash, role, last_login FROM users WHERE id = ?")
+        .bind(user_id)
+        .fetch_one(&app_state.db)
+        .await {
+            Ok(user) => user,
+            Err(e) => {
+                debug!("User not found for id {}: {:?}", user_id, e);
+                return HttpResponse::NotFound().body("User not found");
+            },
+        };
+    let mut context = Context::new();
+    context.insert("edit_user", &user);
+    context.insert("current_user", &current_user);
+    context.insert("user", &current_user);
+    HttpResponse::Ok().body(app_state.tera.render("admin_user_edit.html", &context).unwrap())
+}
+
+// Handle edit user form submission
+async fn edit_user(
+    session: Session,
+    app_state: web::Data<AppState>,
+    form: web::Form<EditUserRequest>,
+) -> impl Responder {
+    let current_user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
+    };
+    // Prevent removing last admin
+    if form.role != "admin" {
+        let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+            .bind(form.user_id)
+            .fetch_one(&app_state.db)
+            .await
+            .unwrap();
+        if user.role == "admin" {
+            let admin_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+                .fetch_one(&app_state.db)
+                .await
+                .unwrap_or(0);
+            if admin_count <= 1 {
+                FlashMessage::error("Cannot remove the last admin user.").send();
+                return HttpResponse::Found().insert_header((header::LOCATION, "/admin/users")).finish();
+            }
+        }
+    }
+    // Update password if provided
+    if let Some(ref password) = form.password {
+        if !password.is_empty() {
+            let hashed_password = match hash_password(password) {
+                Ok(h) => h,
+                Err(_) => {
+                    FlashMessage::error("Failed to process password.").send();
+                    return HttpResponse::Found().insert_header((header::LOCATION, "/admin/users")).finish();
+                }
+            };
+            sqlx::query("UPDATE users SET password_hash = ? WHERE id = ?")
+                .bind(hashed_password)
+                .bind(form.user_id)
+                .execute(&app_state.db)
+                .await
+                .unwrap();
+        }
+    }
+    // Update role
+    sqlx::query("UPDATE users SET role = ? WHERE id = ?")
+        .bind(&form.role)
+        .bind(form.user_id)
+        .execute(&app_state.db)
+        .await
+        .unwrap();
+    FlashMessage::success("User updated successfully.").send();
+    HttpResponse::Found().insert_header((header::LOCATION, "/admin/users")).finish()
+}
+
 
 async fn login(form: web::Form<LoginRequest>, session: Session, app_state: web::Data<AppState>) -> impl Responder {
-    let user = match sqlx::query_as::<_, User>("SELECT id, username, password_hash, role FROM users WHERE username = ?")
+    let user = match sqlx::query_as::<_, User>("SELECT id, username, password_hash, role, last_login FROM users WHERE username = ?")
         .bind(&form.username).fetch_optional(&app_state.db).await {
             Ok(Some(user)) => user,
             _ => {
@@ -284,7 +421,13 @@ async fn login(form: web::Form<LoginRequest>, session: Session, app_state: web::
         };
 
     if verify_password(&user.password_hash, &form.password) {
-        session.insert("user", user).unwrap();
+        session.insert("user", &user).unwrap();
+        // Update last_login for the user
+        sqlx::query("UPDATE users SET last_login = datetime('now') WHERE id = ?")
+            .bind(user.id)
+            .execute(&app_state.db)
+            .await
+            .ok();
         FlashMessage::info("Login successful!").send();
         HttpResponse::Found().insert_header((header::LOCATION, "/")).finish()
     } else {
@@ -712,6 +855,8 @@ async fn main() -> std::io::Result<()> {
             .route("/admin/users/add", web::get().to(show_add_user_form))
             .route("/admin/users/add", web::post().to(add_user))
             .route("/admin/users/delete", web::post().to(delete_user))
+            .route("/admin/users/edit/{user_id}", web::get().to(show_edit_user_form))
+            .route("/admin/users/edit/{user_id}", web::post().to(edit_user))
             .service(Files::new("/static", "./static").show_files_listing())
     })
     .bind(("127.0.0.1", 8081))?

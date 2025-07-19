@@ -1,0 +1,69 @@
+warning: unused import: `FromRow`
+  --> src/main.rs:19:24
+   |
+19 | use sqlx::{SqlitePool, FromRow};
+   |                        ^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` on by default
+
+warning: unused variable: `current_user`
+   --> src/main.rs:348:9
+    |
+348 |     let current_user = match session.get::<User>("user") {
+    |         ^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_current_user`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unused variable: `app_state`
+   --> src/main.rs:858:5
+    |
+858 |     app_state: web::Data<AppState>,
+    |     ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_app_state`
+
+warning: unused variable: `form`
+   --> src/main.rs:859:5
+    |
+859 |     form: web::Json<serde_json::Value>,
+    |     ^^^^ help: if this is intentional, prefix it with an underscore: `_form`
+
+warning: `luks_web_manager` (bin "luks_web_manager") generated 4 warnings (run `cargo fix --bin "luks_web_manager"` to apply 1 suggestion)
+    Finished `release` profile [optimized] target(s) in 0.28s
+     Running `target/release/luks_web_manager`
+[2025-07-19T17:43:01Z INFO  luks_web_manager] Path /mnt/secure_data exists but is not a mount point.
+[2025-07-19T17:43:01Z INFO  luks_web_manager] Starting server at http://127.0.0.1:8081
+[2025-07-19T17:43:01Z INFO  actix_server::builder] starting 4 workers
+[2025-07-19T17:43:01Z INFO  actix_server::server] Actix runtime found; starting in Actix runtime
+[2025-07-19T17:43:01Z INFO  actix_server::server] starting service: "actix-web-service-127.0.0.1:8081", workers: 4, listening on: 127.0.0.1:8081
+[2025-07-19T17:43:11Z WARN  actix_session::middleware] The session cookie attached to the incoming request failed to pass cryptographic checks (signature verification/decryption).
+[2025-07-19T17:43:11Z INFO  actix_web::middleware::logger] 127.0.0.1 "POST /admin/users/bulk-delete HTTP/1.1" 401 53 "-" "curl/8.5.0" 0.000237
+[2025-07-19T17:43:18Z INFO  actix_web::middleware::logger] 127.0.0.1 "POST /login HTTP/1.1" 302 0 "-" "curl/8.5.0" 0.072293
+[2025-07-19T17:43:18Z INFO  actix_web::middleware::logger] 127.0.0.1 "POST /admin/users/bulk-delete HTTP/1.1" 200 107 "-" "curl/8.5.0" 0.000162
+[2025-07-19T17:49:18Z WARN  actix_session::middleware] The session cookie attached to the incoming request failed to pass cryptographic checks (signature verification/decryption).
+[2025-07-19T17:49:18Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET /admin/users HTTP/1.1" 302 0 "http://127.0.0.1:8081/admin/users" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.000242
+[2025-07-19T17:49:18Z WARN  actix_session::middleware] The session cookie attached to the incoming request failed to pass cryptographic checks (signature verification/decryption).
+[2025-07-19T17:49:18Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET /login HTTP/1.1" 200 5855 "http://127.0.0.1:8081/admin/users" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.000174
+[2025-07-19T17:49:24Z WARN  actix_session::middleware] The session cookie attached to the incoming request failed to pass cryptographic checks (signature verification/decryption).
+[2025-07-19T17:49:25Z INFO  actix_web::middleware::logger] 127.0.0.1 "POST /login HTTP/1.1" 302 0 "http://127.0.0.1:8081/login" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.099125
+[2025-07-19T17:49:25Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET / HTTP/1.1" 200 28005 "http://127.0.0.1:8081/login" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.000186
+[2025-07-19T17:49:26Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET /admin/users HTTP/1.1" 200 38414 "http://127.0.0.1:8081/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.001202
+[2025-07-19T17:49:27Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET /admin/users/edit/2 HTTP/1.1" 200 4995 "http://127.0.0.1:8081/admin/users" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.000865
+[2025-07-19T17:49:33Z INFO  actix_web::middleware::logger] 127.0.0.1 "POST /admin/users/bulk-delete HTTP/1.1" 200 107 "http://127.0.0.1:8081/admin/users" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.000217
+[2025-07-19T17:49:34Z INFO  actix_web::middleware::logger] 127.0.0.1 "POST /admin/users/bulk-delete HTTP/1.1" 200 107 "http://127.0.0.1:8081/admin/users" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.000155
+[2025-07-19T17:49:35Z INFO  actix_web::middleware::logger] 127.0.0.1 "POST /admin/users/bulk-delete HTTP/1.1" 200 107 "http://127.0.0.1:8081/admin/users" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.000232
+[2025-07-19T17:49:36Z INFO  actix_web::middleware::logger] 127.0.0.1 "POST /admin/users/bulk-delete HTTP/1.1" 200 107 "http://127.0.0.1:8081/admin/users" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.000229
+[2025-07-19T17:49:42Z INFO  actix_web::middleware::logger] 127.0.0.1 "POST /admin/users/bulk-delete HTTP/1.1" 200 107 "http://127.0.0.1:8081/admin/users" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.000153
+[2025-07-19T17:49:45Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET /admin/users HTTP/1.1" 200 38414 "http://127.0.0.1:8081/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.000946
+[2025-07-19T17:49:48Z INFO  actix_web::middleware::logger] 127.0.0.1 "POST /login HTTP/1.1" 302 0 "http://127.0.0.1:8081/login" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.098781
+[2025-07-19T17:49:48Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET / HTTP/1.1" 200 28005 "http://127.0.0.1:8081/login" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.000233
+[2025-07-19T17:49:49Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET /admin/users HTTP/1.1" 200 38414 "http://127.0.0.1:8081/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.001163
+[2025-07-19T17:49:50Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET /.well-known/appspecific/com.chrome.devtools.json HTTP/1.1" 404 0 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.000146
+[2025-07-19T17:49:50Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET /static/js/bootstrap.bundle.min.js.map HTTP/1.1" 404 0 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.000204
+[2025-07-19T17:49:51Z INFO  actix_web::middleware::logger] 127.0.0.1 "GET /static/css/bootstrap.min.css.map HTTP/1.1" 404 0 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36" 0.000176
+[2025-07-19T17:50:00Z INFO  actix_web::middleware::logger] 127.0.0.1 "POST /admin/users/bulk-delete HTTP/1.1" 200 107 "http://127.0.0.1:8081/admin/users" "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36" 0.000128
+[2025-07-19T17:50:01Z INFO  actix_web::middleware::logger] 127.0.0.1 "POST /admin/users/bulk-delete HTTP/1.1" 200 107 "http://127.0.0.1:8081/admin/users" "Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Mobile Safari/537.36" 0.000153
+[2025-07-19T17:50:52Z INFO  actix_server::server] SIGTERM received; starting graceful shutdown
+[2025-07-19T17:50:52Z INFO  actix_server::accept] accept thread stopped
+[2025-07-19T17:50:52Z INFO  actix_server::worker] shutting down idle worker
+[2025-07-19T17:50:52Z INFO  actix_server::worker] shutting down idle worker
+[2025-07-19T17:50:52Z INFO  actix_server::worker] shutting down idle worker
+[2025-07-19T17:50:52Z INFO  actix_server::worker] shutting down idle worker

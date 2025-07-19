@@ -169,6 +169,59 @@ fn verify_password(hash: &str, password: &str) -> bool {
     Argon2::default().verify_password(password.as_bytes(), &parsed_hash).is_ok()
 }
 
+/// Check if a user has the required permission for a given path.
+/// `action` can be "read", "write", "delete", or "share".
+pub async fn check_user_permission(
+    db: &SqlitePool,
+    user_id: i64,
+    path: &str,
+    action: &str,
+) -> Result<bool, sqlx::Error> {
+    // Admins always have all permissions
+    let user_role: Option<String> = sqlx::query_scalar("SELECT role FROM users WHERE id = ?")
+        .bind(user_id)
+        .fetch_optional(db)
+        .await?;
+    if let Some(role) = user_role {
+        if role == "admin" {
+            return Ok(true);
+        }
+    }
+
+    // Check for explicit permission on the path or any parent path
+    let mut current_path = path;
+    loop {
+        let row = sqlx::query!(
+            "SELECT can_read, can_write, can_delete, can_share FROM permissions WHERE user_id = ? AND path = ?",
+            user_id, current_path
+        )
+        .fetch_optional(db)
+        .await?;
+        if let Some(perm) = row {
+            let allowed = match action {
+                "read" => perm.can_read,
+                "write" => perm.can_write,
+                "delete" => perm.can_delete,
+                "share" => perm.can_share,
+                _ => false,
+            };
+            return Ok(allowed);
+        }
+        // Move up to parent directory
+        if let Some(pos) = current_path.rfind('/') {
+            if pos == 0 {
+                current_path = "/";
+            } else {
+                current_path = &current_path[..pos];
+            }
+        } else {
+            break;
+        }
+    }
+    // Default: allow read, deny others
+    Ok(action == "read")
+}
+
 
 // --- 4. Route Handlers ---
 async fn show_dashboard(session: Session, app_state: web::Data<AppState>, flash_messages: IncomingFlashMessages, query: web::Query<DashboardQuery>) -> Result<HttpResponse, Error> {
@@ -566,6 +619,22 @@ async fn upload_files(
         return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
     }
     
+    // Check write permission
+    let user_id = _user.id;
+    let rel_path = form.current_path.as_str();
+    match check_user_permission(&app_state.db, user_id, rel_path, "write").await {
+        Ok(true) => {},
+        Ok(false) => {
+            FlashMessage::error("You do not have permission to upload files here.").send();
+            return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
+        },
+        Err(e) => {
+            log::error!("Permission check failed: {}", e);
+            FlashMessage::error("Permission check failed.").send();
+            return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
+        }
+    }
+
     let mut uploaded_count = 0;
     let mut errors = Vec::new();
     
@@ -668,6 +737,26 @@ async fn delete_item_json(
         }));
     }
     
+    // Check delete permission
+    let user_id = _user.id;
+    let rel_path = format!("{}/{}", req.current_path, req.item_name);
+    match check_user_permission(&app_state.db, user_id, &rel_path, "delete").await {
+        Ok(true) => {},
+        Ok(false) => {
+            return HttpResponse::Unauthorized().json(serde_json::json!({
+                "success": false,
+                "error": "You do not have permission to delete this file."
+            }));
+        },
+        Err(e) => {
+            log::error!("Permission check failed: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "success": false,
+                "error": "Permission check failed."
+            }));
+        }
+    }
+
     let result = if item_path.is_dir() { 
         tokio::fs::remove_dir_all(&item_path).await 
     } else { 

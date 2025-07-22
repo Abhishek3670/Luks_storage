@@ -1,3 +1,4 @@
+mod cctv_manager;
 use actix_multipart::{form::{tempfile::TempFile, MultipartForm}};
 use sysinfo::System;
 use actix_files::Files;
@@ -49,9 +50,8 @@ struct AppState {
     config: Config,
     db: SqlitePool,
     tera: Tera,
+    cctv_manager: Arc<Mutex<cctv_manager::CctvManager>>,
 }
-
-// --- 2. User & Request Models ---
 #[derive(Deserialize)]
 struct LoginRequest {
     username: String,
@@ -1023,11 +1023,22 @@ async fn main() -> std::io::Result<()> {
 
     let tera = Tera::new("templates/**/*.html").expect("Failed to parse templates");
 
+    // Initialize CCTV Manager
+    let cctv_python_path = std::env::var("CCTV_PYTHON_PATH")
+        .unwrap_or_else(|_| "../Home_CCTV_AI".to_string());
+    let cctv_api_port: u16 = std::env::var("CCTV_API_PORT")
+        .unwrap_or_else(|_| "8082".to_string())
+        .parse()
+        .expect("Invalid CCTV_API_PORT");
+    
+    let cctv_manager = cctv_manager::CctvManager::new(&cctv_python_path, cctv_api_port);
+    
     let app_state = AppState {
         is_mounted: Arc::new(Mutex::new(initial_mount_status)),
         config,
         db: db_pool,
         tera: tera,
+        cctv_manager: Arc::new(Mutex::new(cctv_manager)),
     };
 
     log::info!("Starting server at http://127.0.0.1:8081");
@@ -1068,6 +1079,14 @@ async fn main() -> std::io::Result<()> {
             .route("/admin/permissions/delete", web::post().to(delete_permission))
             .route("/admin/api/server-health", web::get().to(server_health_api))
             .route("/admin/server-health", web::get().to(show_server_health_dashboard))
+            // CCTV Management Routes (Phase 2)
+            .route("/cctv/status", web::get().to(cctv_status))
+            .route("/cctv/start", web::post().to(cctv_start))
+            .route("/cctv/stop", web::post().to(cctv_stop))
+            .route("/cctv/cameras", web::get().to(cctv_cameras))
+            .route("/cctv/stream/{camera_id}", web::get().to(cctv_stream))
+            .route("/cctv/recordings", web::get().to(cctv_recordings))
+            .route("/cctv/recording/{filename}", web::get().to(cctv_recording))
             .service(Files::new("/static", "./static").show_files_listing())
     })
     .bind(("127.0.0.1", 8081))?
@@ -1244,6 +1263,209 @@ async fn show_server_health_dashboard(session: Session, app_state: web::Data<App
         Err(err) => {
             log::error!("Template error: {}", err);
             HttpResponse::InternalServerError().body("Template error")
+        }
+    }
+}
+
+// ============================================================================
+// CCTV Management Handlers (Phase 2)
+// ============================================================================
+
+// Get CCTV system status
+async fn cctv_status(session: Session, app_state: web::Data<AppState>) -> impl Responder {
+    let _user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Unauthorized().json(serde_json::json!({
+            "error": "Authentication required"
+        })),
+    };
+
+    let cctv_manager = app_state.cctv_manager.lock().unwrap();
+    
+    match cctv_manager.health_check().await {
+        Ok(is_healthy) => {
+            if is_healthy {
+                match cctv_manager.get_system_status().await {
+                    Ok(status) => HttpResponse::Ok().json(status),
+                    Err(e) => {
+                        log::error!("Failed to get CCTV status: {}", e);
+                        HttpResponse::InternalServerError().json(serde_json::json!({
+                            "error": "Failed to get system status"
+                        }))
+                    }
+                }
+            } else {
+                HttpResponse::Ok().json(serde_json::json!({
+                    "running": false,
+                    "message": "CCTV system is not running"
+                }))
+            }
+        }
+        Err(e) => {
+            log::error!("CCTV health check failed: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Health check failed"
+            }))
+        }
+    }
+}
+
+// Start CCTV system
+async fn cctv_start(session: Session, app_state: web::Data<AppState>) -> impl Responder {
+    let user = match session.get::<User>("user") {
+        Ok(Some(user)) if user.role == "admin" => user,
+        _ => return HttpResponse::Unauthorized().json(serde_json::json!({
+            "error": "Admin authentication required"
+        })),
+    };
+
+    log::info!("User {} starting CCTV system", user.username);
+    
+    let mut cctv_manager = app_state.cctv_manager.lock().unwrap();
+    
+    match cctv_manager.start_api_server().await {
+        Ok(_) => {
+            log::info!("CCTV system started successfully");
+            HttpResponse::Ok().json(serde_json::json!({
+                "success": true,
+                "message": "CCTV system started successfully"
+            }))
+        }
+        Err(e) => {
+            log::error!("Failed to start CCTV system: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to start CCTV system: {}", e)
+            }))
+        }
+    }
+}
+
+// Stop CCTV system
+async fn cctv_stop(session: Session, app_state: web::Data<AppState>) -> impl Responder {
+    let user = match session.get::<User>("user") {
+        Ok(Some(user)) if user.role == "admin" => user,
+        _ => return HttpResponse::Unauthorized().json(serde_json::json!({
+            "error": "Admin authentication required"
+        })),
+    };
+
+    log::info!("User {} stopping CCTV system", user.username);
+    
+    let mut cctv_manager = app_state.cctv_manager.lock().unwrap();
+    
+    match cctv_manager.stop_api_server().await {
+        Ok(_) => {
+            log::info!("CCTV system stopped successfully");
+            HttpResponse::Ok().json(serde_json::json!({
+                "success": true,
+                "message": "CCTV system stopped successfully"
+            }))
+        }
+        Err(e) => {
+            log::error!("Failed to stop CCTV system: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to stop CCTV system: {}", e)
+            }))
+        }
+    }
+}
+
+// List cameras
+async fn cctv_cameras(session: Session, app_state: web::Data<AppState>) -> impl Responder {
+    let _user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Unauthorized().json(serde_json::json!({
+            "error": "Authentication required"
+        })),
+    };
+
+    let cctv_manager = app_state.cctv_manager.lock().unwrap();
+    
+    match cctv_manager.list_cameras().await {
+        Ok(cameras) => HttpResponse::Ok().json(cameras),
+        Err(e) => {
+            log::error!("Failed to list cameras: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to list cameras"
+            }))
+        }
+    }
+}
+
+// Proxy camera stream
+async fn cctv_stream(
+    path: web::Path<String>, 
+    session: Session, 
+    app_state: web::Data<AppState>
+) -> impl Responder {
+    let _user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Unauthorized().finish(),
+    };
+
+    let camera_id = path.into_inner();
+    let cctv_manager = app_state.cctv_manager.lock().unwrap();
+    
+    match cctv_manager.get_camera_stream_url(&camera_id).await {
+        Ok(stream_url) => {
+            // Proxy the stream (simplified - in production you might want more sophisticated streaming)
+            HttpResponse::Found()
+                .insert_header((header::LOCATION, stream_url))
+                .finish()
+        }
+        Err(e) => {
+            log::error!("Failed to get stream URL for camera {}: {}", camera_id, e);
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
+// List recordings
+async fn cctv_recordings(session: Session, app_state: web::Data<AppState>) -> impl Responder {
+    let _user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Unauthorized().json(serde_json::json!({
+            "error": "Authentication required"
+        })),
+    };
+
+    let cctv_manager = app_state.cctv_manager.lock().unwrap();
+    
+    match cctv_manager.list_recordings().await {
+        Ok(recordings) => HttpResponse::Ok().json(recordings),
+        Err(e) => {
+            log::error!("Failed to list recordings: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to list recordings"
+            }))
+        }
+    }
+}
+
+// Get specific recording
+async fn cctv_recording(
+    path: web::Path<String>, 
+    session: Session, 
+    app_state: web::Data<AppState>
+) -> impl Responder {
+    let _user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Unauthorized().finish(),
+    };
+
+    let filename = path.into_inner();
+    let cctv_manager = app_state.cctv_manager.lock().unwrap();
+    
+    match cctv_manager.get_recording_url(&filename).await {
+        Ok(recording_url) => {
+            // Proxy the recording download
+            HttpResponse::Found()
+                .insert_header((header::LOCATION, recording_url))
+                .finish()
+        }
+        Err(e) => {
+            log::error!("Failed to get recording URL for {}: {}", filename, e);
+            HttpResponse::NotFound().finish()
         }
     }
 }

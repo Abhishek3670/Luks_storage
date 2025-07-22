@@ -63,7 +63,7 @@ pub struct CctvManager {
 
 impl CctvManager {
     pub fn new(python_project_path: &str, api_port: u16) -> Self {
-        let python_script_path = PathBuf::from(python_project_path).join("api_server.py");
+        let python_script_path = PathBuf::from(python_project_path).join("test_api_server.py");
         let api_url = format!("http://127.0.0.1:{}", api_port);
         
         let client = Client::builder()
@@ -96,7 +96,7 @@ impl CctvManager {
         }
         
         // Start the Python API server
-        let mut command = Command::new("python");
+        let mut command = Command::new("../Home_CCTV_AI/venv/bin/python");
         command
             .arg(&self.python_script_path)
             .stdout(Stdio::piped())
@@ -110,7 +110,7 @@ impl CctvManager {
         
         // Wait for the server to start up (with retries)
         let mut retries = 0;
-        const MAX_RETRIES: u32 = 30;
+        const MAX_RETRIES: u32 = 60;
         const RETRY_DELAY: Duration = Duration::from_millis(1000);
         
         while retries < MAX_RETRIES {

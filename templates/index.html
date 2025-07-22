@@ -59,6 +59,24 @@
                     </form>
                 </div>
             </div>
+
+        <!-- CCTV Status Card -->
+        <div class="card shadow-sm mt-3">
+            <div class="card-body">
+                <h6 class="card-title">
+                    <i class="bi bi-camera-video"></i> CCTV System
+                </h6>
+                <div class="d-flex align-items-center">
+                    <i id="cctv-status-icon" class="bi bi-circle-fill me-2 text-secondary"></i>
+                    <span id="cctv-status-text" class="badge bg-secondary">Checking...</span>
+                </div>
+                <div class="mt-2">
+                    <a href="/cctv" class="btn btn-sm btn-outline-primary w-100">
+                        <i class="bi bi-gear"></i> Manage CCTV
+                    </a>
+                </div>
+            </div>
+        </div>
         {% endif %}
     </div>
 
@@ -776,6 +794,39 @@ document.addEventListener('keydown', function(e) {
         e.preventDefault();
         pasteItems();
     }
+});
+
+// CCTV Status Checker
+async function checkCCTVStatus() {
+    try {
+        const response = await fetch("/cctv/status");
+        const data = await response.json();
+        const statusIcon = document.getElementById("cctv-status-icon");
+        const statusText = document.getElementById("cctv-status-text");
+        
+        if (data.running) {
+            statusIcon.className = "bi bi-circle-fill me-2 text-success";
+            statusText.className = "badge bg-success";
+            statusText.textContent = `Online (${data.cameras_count || 0} cameras)`;
+        } else {
+            statusIcon.className = "bi bi-circle-fill me-2 text-danger";
+            statusText.className = "badge bg-danger";
+            statusText.textContent = "Offline";
+        }
+    } catch (error) {
+        console.error("CCTV status check failed:", error);
+        const statusIcon = document.getElementById("cctv-status-icon");
+        const statusText = document.getElementById("cctv-status-text");
+        statusIcon.className = "bi bi-circle-fill me-2 text-secondary";
+        statusText.className = "badge bg-secondary";
+        statusText.textContent = "Unknown";
+    }
+}
+
+// Check CCTV status on page load and periodically
+document.addEventListener("DOMContentLoaded", function() {
+    checkCCTVStatus();
+    setInterval(checkCCTVStatus, 10000); // Check every 10 seconds
 });
 </script>
 {% endblock %}

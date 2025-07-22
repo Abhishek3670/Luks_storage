@@ -1079,6 +1079,7 @@ async fn main() -> std::io::Result<()> {
             .route("/admin/permissions/delete", web::post().to(delete_permission))
             .route("/admin/api/server-health", web::get().to(server_health_api))
             .route("/admin/server-health", web::get().to(show_server_health_dashboard))
+            .route("/cctv", web::get().to(show_cctv_dashboard))
             // CCTV Management Routes (Phase 2)
             .route("/cctv/status", web::get().to(cctv_status))
             .route("/cctv/start", web::post().to(cctv_start))
@@ -1466,6 +1467,25 @@ async fn cctv_recording(
         Err(e) => {
             log::error!("Failed to get recording URL for {}: {}", filename, e);
             HttpResponse::NotFound().finish()
+        }
+    }
+}
+
+// CCTV Dashboard Handler
+async fn show_cctv_dashboard(session: Session, app_state: web::Data<AppState>) -> impl Responder {
+    let _user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
+    };
+
+    let mut context = Context::new();
+    context.insert("current_page", "cctv");
+    
+    match app_state.tera.render("cctv_dashboard.html", &context) {
+        Ok(rendered) => HttpResponse::Ok().content_type("text/html").body(rendered),
+        Err(err) => {
+            log::error!("Template error: {}", err);
+            HttpResponse::InternalServerError().body("Template error")
         }
     }
 }

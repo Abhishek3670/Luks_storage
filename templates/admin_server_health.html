@@ -1,9 +1,39 @@
 {% extends "base.html" %}
+{% block title %}Server Health{% endblock %}
 {% block content %}
-<div class="container mt-4">
-  <h2>Server Health</h2>
+<div class="d-flex flex-column flex-md-row">
+  <!-- Sidebar -->
+    <div class="sidebar border-end bg-light p-3" style="min-width: 280px;">
+        <h5 class="mb-3">Admin Menu</h5>
+        <ul class="nav nav-pills flex-column">
+            <li class="nav-item">
+              <a href="/admin/users" class="nav-link">
+                <i class="bi bi-people me-2"></i>Users
+              </a>
+            </li>
+            <li class="nav-item">
+              <a href="/admin/permissions" class="nav-link">
+                <i class="bi bi-shield-check me-2"></i>Permissions
+              </a>
+            </li>
+            <li class="nav-item">
+              <a href="/admin/camera-settings" class="nav-link">
+                <i class="bi bi-camera me-2"></i>Camera Settings
+              </a>
+            </li>
+            <li class="nav-item">
+              <a href="/admin/server-health" class="nav-link active" aria-current="page">
+                <i class="bi bi-activity me-2"></i>Server Health
+              </a>
+            </li>
+        </ul>
+    </div>
+  <div class="main-content flex-grow-1 p-3">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="h4">Server Health</h2>
+        </div>  
   <div id="health-status" class="row g-3">
-    <div class="col-md-4">
+    <div class="col-md-6">
       <div class="card">
         <div class="card-body">
           <h5 class="card-title">Uptime</h5>
@@ -11,7 +41,7 @@
         </div>
       </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-6">
       <div class="card">
         <div class="card-body">
           <h5 class="card-title">Server Time</h5>
@@ -37,6 +67,7 @@
     </div>
   </div>
 </div>
+</div>
 <script>
 function formatBytes(bytes) {
   if (bytes >= 1024 * 1024 * 1024) {
@@ -49,6 +80,7 @@ function formatBytes(bytes) {
     return bytes + " B";
   }
 }
+
 function formatUptime(seconds) {
   const d = Math.floor(seconds / (3600*24));
   seconds  -= d*3600*24;
@@ -58,17 +90,50 @@ function formatUptime(seconds) {
   seconds  -= m*60;
   return `${d}d ${h}h ${m}m ${seconds}s`;
 }
-function updateHealth() {
-  fetch("/admin/api/server-health", { credentials: "same-origin" }).then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); }).then(data => {
-    document.getElementById('uptime').textContent = formatUptime(data.uptime);
-    document.getElementById('server_time').textContent = data.server_time;
-    document.getElementById('memory').textContent = `Used: ${formatBytes(data.memory.used)} / ${formatBytes(data.memory.total)} | Swap: ${formatBytes(data.memory.used_swap)} / ${formatBytes(data.memory.total_swap)}`;
-    document.getElementById('cpu_usage').textContent = `${data.cpu_usage.toFixed(1)}%`;
-  }).catch(() => {
-    document.getElementById('health-status').innerHTML = '<div class="alert alert-danger">Failed to fetch server health.</div>';
-  });
+
+function formatServerTime(timeString) {
+  // Convert server time to DD/MM/YYYY-HH:MM:SS format
+  const date = new Date(timeString);
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const year = date.getFullYear();
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  const seconds = date.getSeconds().toString().padStart(2, '0');
+  
+  return `${day}/${month}/${year}-${hours}:${minutes}:${seconds}`;
 }
+
+function updateHealth() {
+  fetch("/admin/api/server-health", { credentials: "same-origin" })
+    .then(r => { 
+      if (!r.ok) throw new Error("HTTP " + r.status); 
+      return r.json(); 
+    })
+    .then(data => {
+      document.getElementById('uptime').textContent = formatUptime(data.uptime);
+      document.getElementById('server_time').textContent = formatServerTime(data.server_time);
+      document.getElementById('memory').textContent = `Used: ${formatBytes(data.memory.used)} / ${formatBytes(data.memory.total)}`;
+      document.getElementById('cpu_usage').textContent = `${data.cpu_usage.toFixed(1)}%`;
+    })
+    .catch(() => {
+      document.getElementById('health-status').innerHTML = '<div class="alert alert-danger">Failed to fetch server health.</div>';
+    });
+}
+
+// Add "active" class to card when clicked
+document.addEventListener("DOMContentLoaded", function() {
+  document.querySelectorAll("#health-status .card").forEach(function(card) {
+    card.addEventListener("click", function() {
+      document.querySelectorAll("#health-status .card").forEach(function(c) {
+        c.classList.remove("active");
+      });
+      card.classList.add("active");
+    });
+  });
+});
+
 updateHealth();
 setInterval(updateHealth, 5000);
 </script>
-{% endblock %} 
+{% endblock %}

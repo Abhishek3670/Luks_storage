@@ -1,6 +1,5 @@
-mod cctv_manager;
+
 use actix_multipart::{form::{tempfile::TempFile, MultipartForm}};
-use sysinfo::System;
 use actix_files::Files;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder, http::header, Error};
 use actix_web::web::Query;
@@ -50,7 +49,7 @@ struct AppState {
     config: Config,
     db: SqlitePool,
     tera: Tera,
-    cctv_manager: Arc<Mutex<cctv_manager::CctvManager>>,
+
 }
 #[derive(Deserialize)]
 struct LoginRequest {
@@ -567,6 +566,353 @@ async fn delete_permission(
     HttpResponse::Found().insert_header((header::LOCATION, "/admin/permissions")).finish()
 }
 
+// Show admin camera settings page
+async fn show_admin_camera_settings(
+    session: Session,
+    app_state: web::Data<AppState>,
+    flash_messages: IncomingFlashMessages,
+) -> impl Responder {
+    let user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
+    };
+
+    if user.role != "admin" {
+        FlashMessage::error("Access denied. Admin privileges required.").send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
+    }
+
+    // Get all cameras from database
+    let cameras = sqlx::query_as::<_, Camera>(
+        "SELECT id, name, location, ip_address, port, username, password, resolution, fps, 
+         recording_enabled, motion_detection, is_online, created_at, updated_at 
+         FROM cameras ORDER BY name"
+    )
+    .fetch_all(&app_state.db)
+    .await
+    .unwrap_or_default();
+
+    let mut context = Context::new();
+    context.insert("user", &user);
+    context.insert("cameras", &cameras);
+    
+    let flash_messages: Vec<_> = flash_messages.iter().collect();
+    context.insert("messages", &flash_messages);
+
+    HttpResponse::Ok().content_type("text/html").body(
+        app_state.tera.render("admin_camera_settings.html", &context).unwrap()
+    )
+}
+
+// Add new camera
+async fn add_camera(
+    session: Session,
+    app_state: web::Data<AppState>,
+    form: web::Form<AddCameraRequest>,
+) -> impl Responder {
+    let user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
+    };
+
+    if user.role != "admin" {
+        FlashMessage::error("Access denied. Admin privileges required.").send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
+    }
+
+    // Validate IP address format
+    if !is_valid_ip(&form.ip_address) {
+        FlashMessage::error("Invalid IP address format.").send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/admin/camera-settings")).finish();
+    }
+
+    // Check if camera with same IP already exists
+    let existing_camera = sqlx::query_as::<_, Camera>(
+        "SELECT id, name, location, ip_address, port, username, password, resolution, fps,
+         recording_enabled, motion_detection, is_online, created_at, updated_at 
+         FROM cameras WHERE ip_address = ?"
+    )
+    .bind(&form.ip_address)
+    .fetch_optional(&app_state.db)
+    .await
+    .unwrap_or(None);
+
+    if existing_camera.is_some() {
+        FlashMessage::error("A camera with this IP address already exists.").send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/admin/camera-settings")).finish();
+    }
+
+    let port = form.port.unwrap_or(554);
+    let resolution = form.resolution.as_deref().unwrap_or("1920x1080").to_string();
+    let fps = form.fps.unwrap_or(30);
+    let recording_enabled = form.recording_enabled.unwrap_or(true);
+    let motion_detection = form.motion_detection.unwrap_or(false);
+
+    // Insert new camera
+    let result = sqlx::query(
+        "INSERT INTO cameras (name, location, ip_address, port, username, password, resolution, fps,
+         recording_enabled, motion_detection, is_online, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'), datetime('now'))"
+    )
+    .bind(&form.camera_name)
+    .bind(&form.location)
+    .bind(&form.ip_address)
+    .bind(port)
+    .bind(&form.username)
+    .bind(&form.password)
+    .bind(&resolution)
+    .bind(fps)
+    .bind(recording_enabled)
+    .bind(motion_detection)
+    .execute(&app_state.db)
+    .await;
+
+    match result {
+        Ok(_) => {
+            FlashMessage::success("Camera added successfully.").send();
+            // Test camera connection asynchronously
+            tokio::spawn(test_camera_connection(form.ip_address.clone(), port));
+        }
+        Err(e) => {
+            log::error!("Failed to add camera: {}", e);
+            FlashMessage::error("Failed to add camera. Please try again.").send();
+        }
+    }
+
+    HttpResponse::Found().insert_header((header::LOCATION, "/admin/camera-settings")).finish()
+}
+
+// Edit camera
+async fn edit_camera(
+    session: Session,
+    app_state: web::Data<AppState>,
+    form: web::Form<EditCameraRequest>,
+) -> impl Responder {
+    let user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
+    };
+
+    if user.role != "admin" {
+        FlashMessage::error("Access denied. Admin privileges required.").send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
+    }
+
+    // Validate IP address format
+    if !is_valid_ip(&form.ip_address) {
+        FlashMessage::error("Invalid IP address format.").send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/admin/camera-settings")).finish();
+    }
+
+    let port = form.port.unwrap_or(554);
+    let resolution = form.resolution.as_deref().unwrap_or("1920x1080").to_string();
+    let fps = form.fps.unwrap_or(30);
+    let recording_enabled = form.recording_enabled.unwrap_or(true);
+    let motion_detection = form.motion_detection.unwrap_or(false);
+
+    // Update camera
+    let result = sqlx::query(
+        "UPDATE cameras SET name = ?, location = ?, ip_address = ?, port = ?, username = ?, 
+         password = ?, resolution = ?, fps = ?, recording_enabled = ?, motion_detection = ?, 
+         updated_at = datetime('now') WHERE id = ?"
+    )
+    .bind(&form.camera_name)
+    .bind(&form.location)
+    .bind(&form.ip_address)
+    .bind(port)
+    .bind(&form.username)
+    .bind(&form.password)
+    .bind(&resolution)
+    .bind(fps)
+    .bind(recording_enabled)
+    .bind(motion_detection)
+    .bind(form.camera_id)
+    .execute(&app_state.db)
+    .await;
+
+    match result {
+        Ok(_) => {
+            FlashMessage::success("Camera updated successfully.").send();
+            // Test camera connection asynchronously
+            tokio::spawn(test_camera_connection(form.ip_address.clone(), port));
+        }
+        Err(e) => {
+            log::error!("Failed to update camera: {}", e);
+            FlashMessage::error("Failed to update camera. Please try again.").send();
+        }
+    }
+
+    HttpResponse::Found().insert_header((header::LOCATION, "/admin/camera-settings")).finish()
+}
+
+// Delete camera
+async fn delete_camera(
+    session: Session,
+    app_state: web::Data<AppState>,
+    form: web::Form<DeleteCameraRequest>,
+) -> impl Responder {
+    let user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
+    };
+
+    if user.role != "admin" {
+        FlashMessage::error("Access denied. Admin privileges required.").send();
+        return HttpResponse::Found().insert_header((header::LOCATION, "/")).finish();
+    }
+
+    let result = sqlx::query("DELETE FROM cameras WHERE id = ?")
+        .bind(form.camera_id)
+        .execute(&app_state.db)
+        .await;
+
+    match result {
+        Ok(_) => {
+            FlashMessage::success("Camera deleted successfully.").send();
+        }
+        Err(e) => {
+            log::error!("Failed to delete camera: {}", e);
+            FlashMessage::error("Failed to delete camera. Please try again.").send();
+        }
+    }
+
+    HttpResponse::Found().insert_header((header::LOCATION, "/admin/camera-settings")).finish()
+}
+
+// Test camera connection
+async fn test_camera_connection_api(
+    session: Session,
+    app_state: web::Data<AppState>,
+    path: web::Path<i64>,
+) -> impl Responder {
+    let user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Unauthorized().json(serde_json::json!({
+            "success": false,
+            "error": "Authentication required"
+        })),
+    };
+
+    if user.role != "admin" {
+        return HttpResponse::Forbidden().json(serde_json::json!({
+            "success": false,
+            "error": "Access denied. Admin privileges required."
+        }));
+    }
+
+    let camera_id = path.into_inner();
+    
+    // Get camera details
+    let camera = match sqlx::query_as::<_, Camera>(
+        "SELECT id, name, location, ip_address, port, username, password, resolution, fps,
+         recording_enabled, motion_detection, is_online, created_at, updated_at 
+         FROM cameras WHERE id = ?"
+    )
+    .bind(camera_id)
+    .fetch_optional(&app_state.db)
+    .await
+    {
+        Ok(Some(camera)) => camera,
+        Ok(None) => return HttpResponse::NotFound().json(serde_json::json!({
+            "success": false,
+            "error": "Camera not found"
+        })),
+        Err(e) => {
+            log::error!("Database error: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "success": false,
+                "error": "Database error"
+            }));
+        }
+    };
+
+    // Test connection
+    let is_online = test_camera_connectivity(&camera.ip_address, camera.port).await;
+    
+    // Update camera status in database
+    let _ = sqlx::query("UPDATE cameras SET is_online = ?, updated_at = datetime('now') WHERE id = ?")
+        .bind(is_online)
+        .bind(camera_id)
+        .execute(&app_state.db)
+        .await;
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "success": is_online,
+        "message": if is_online { "Camera connection successful" } else { "Camera connection failed" }
+    }))
+}
+
+// Get camera details API
+async fn get_camera_details(
+    session: Session,
+    app_state: web::Data<AppState>,
+    path: web::Path<i64>,
+) -> impl Responder {
+    let user = match session.get::<User>("user") {
+        Ok(Some(user)) => user,
+        _ => return HttpResponse::Unauthorized().json(serde_json::json!({
+            "error": "Authentication required"
+        })),
+    };
+
+    if user.role != "admin" {
+        return HttpResponse::Forbidden().json(serde_json::json!({
+            "error": "Access denied. Admin privileges required."
+        }));
+    }
+
+    let camera_id = path.into_inner();
+    
+    let camera = match sqlx::query_as::<_, Camera>(
+        "SELECT id, name, location, ip_address, port, username, password, resolution, fps,
+         recording_enabled, motion_detection, is_online, created_at, updated_at 
+         FROM cameras WHERE id = ?"
+    )
+    .bind(camera_id)
+    .fetch_optional(&app_state.db)
+    .await
+    {
+        Ok(Some(camera)) => camera,
+        Ok(None) => return HttpResponse::NotFound().json(serde_json::json!({
+            "error": "Camera not found"
+        })),
+        Err(e) => {
+            log::error!("Database error: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Database error"
+            }));
+        }
+    };
+
+    HttpResponse::Ok().json(camera)
+}
+
+// Helper functions
+fn is_valid_ip(ip: &str) -> bool {
+    use std::net::Ipv4Addr;
+    ip.parse::<Ipv4Addr>().is_ok()
+}
+
+async fn test_camera_connection(ip: String, port: i32) {
+    tokio::spawn(async move {
+        let is_online = test_camera_connectivity(&ip, port).await;
+        log::info!("Camera {}:{} connectivity test: {}", ip, port, if is_online { "SUCCESS" } else { "FAILED" });
+    });
+}
+
+async fn test_camera_connectivity(ip: &str, port: i32) -> bool {
+    use tokio::net::TcpStream;
+    use tokio::time::{timeout, Duration};
+
+    let address = format!("{}:{}", ip, port);
+    let connection_result = timeout(Duration::from_secs(5), TcpStream::connect(&address)).await;
+    
+    match connection_result {
+        Ok(Ok(_)) => true,
+        _ => false,
+    }
+}
+
 async fn login(form: web::Form<LoginRequest>, session: Session, app_state: web::Data<AppState>) -> impl Responder {
     log::info!("Login attempt for user: {}", form.username);
     
@@ -1023,22 +1369,14 @@ async fn main() -> std::io::Result<()> {
 
     let tera = Tera::new("templates/**/*.html").expect("Failed to parse templates");
 
-    // Initialize CCTV Manager
-    let cctv_python_path = std::env::var("CCTV_PYTHON_PATH")
-        .unwrap_or_else(|_| "../Home_CCTV_AI".to_string());
-    let cctv_api_port: u16 = std::env::var("CCTV_API_PORT")
-        .unwrap_or_else(|_| "8082".to_string())
-        .parse()
-        .expect("Invalid CCTV_API_PORT");
-    
-    let cctv_manager = cctv_manager::CctvManager::new(&cctv_python_path, cctv_api_port);
+
     
     let app_state = AppState {
         is_mounted: Arc::new(Mutex::new(initial_mount_status)),
         config,
         db: db_pool,
         tera: tera,
-        cctv_manager: Arc::new(Mutex::new(cctv_manager)),
+
     };
 
     log::info!("Starting server at http://127.0.0.1:8081");
@@ -1077,17 +1415,15 @@ async fn main() -> std::io::Result<()> {
             .route("/admin/permissions", web::get().to(show_admin_permissions))
             .route("/admin/permissions/add", web::post().to(add_permission))
             .route("/admin/permissions/delete", web::post().to(delete_permission))
-            .route("/admin/api/server-health", web::get().to(server_health_api))
+            .route("/admin/camera-settings", web::get().to(show_admin_camera_settings))
+            .route("/admin/camera-settings/add", web::post().to(add_camera))
+            .route("/admin/camera-settings/edit", web::post().to(edit_camera))
+            .route("/admin/camera-settings/delete", web::post().to(delete_camera))
+            .route("/admin/camera-settings/test/{camera_id}", web::post().to(test_camera_connection_api))
+            .route("/admin/camera-settings/{camera_id}", web::get().to(get_camera_details))
+
             .route("/admin/server-health", web::get().to(show_server_health_dashboard))
-            .route("/cctv", web::get().to(show_cctv_dashboard))
-            // CCTV Management Routes (Phase 2)
-            .route("/cctv/status", web::get().to(cctv_status))
-            .route("/cctv/start", web::post().to(cctv_start))
-            .route("/cctv/stop", web::post().to(cctv_stop))
-            .route("/cctv/cameras", web::get().to(cctv_cameras))
-            .route("/cctv/stream/{camera_id}", web::get().to(cctv_stream))
-            .route("/cctv/recordings", web::get().to(cctv_recordings))
-            .route("/cctv/recording/{filename}", web::get().to(cctv_recording))
+            .route("/admin/api/server-health", web::get().to(server_health_api))
             .service(Files::new("/static", "./static").show_files_listing())
     })
     .bind(("127.0.0.1", 8081))?
@@ -1211,45 +1547,6 @@ async fn bulk_delete_users(
     HttpResponse::Ok().json(response)
 }
 
-async fn server_health_api(session: Session, app_state: web::Data<AppState>) -> impl Responder {
-    // Only allow admin
-    let _user = match session.get::<User>("user") {
-        Ok(Some(user)) if user.role == "admin" => user,
-        _ => return HttpResponse::Unauthorized().json(serde_json::json!({"error": "Unauthorized"})),
-    };
-
-    let mut sys = System::new_all();
-    sys.refresh_all();
-    let uptime = System::uptime();
-    let total_memory = sys.total_memory();
-    let used_memory = sys.used_memory();
-    let total_swap = sys.total_swap();
-    let used_swap = sys.used_swap();
-    
-    // Get CPU usage
-    let cpu_usage = sys.global_cpu_usage();
-    
-    // Get disk usage
-    let disks: Vec<serde_json::Value> = vec![];
-    
-    let now = chrono::Utc::now().to_rfc3339();
-
-    HttpResponse::Ok().json(serde_json::json!({
-        "uptime": uptime,
-        "server_time": now,
-        "memory": {
-            "total": total_memory,
-            "used": used_memory,
-            "total_swap": total_swap,
-            "used_swap": used_swap
-        },
-        "cpu_usage": cpu_usage,
-        "disks": disks
-    }))
-}
-
-
-// Handler to render the server health dashboard page
 async fn show_server_health_dashboard(session: Session, app_state: web::Data<AppState>) -> impl Responder {
     let _user = match session.get::<User>("user") {
         Ok(Some(user)) if user.role == "admin" => user,
@@ -1268,224 +1565,99 @@ async fn show_server_health_dashboard(session: Session, app_state: web::Data<App
     }
 }
 
-// ============================================================================
-// CCTV Management Handlers (Phase 2)
-// ============================================================================
 
-// Get CCTV system status
-async fn cctv_status(session: Session, app_state: web::Data<AppState>) -> impl Responder {
+async fn server_health_api(session: Session) -> impl Responder {
+    // Check if user is logged in and is admin
     let _user = match session.get::<User>("user") {
-        Ok(Some(user)) => user,
-        _ => return HttpResponse::Unauthorized().json(serde_json::json!({
-            "error": "Authentication required"
-        })),
-    };
-
-    let cctv_manager = app_state.cctv_manager.lock().unwrap();
-    
-    match cctv_manager.health_check().await {
-        Ok(is_healthy) => {
-            if is_healthy {
-                match cctv_manager.get_system_status().await {
-                    Ok(status) => HttpResponse::Ok().json(status),
-                    Err(e) => {
-                        log::error!("Failed to get CCTV status: {}", e);
-                        HttpResponse::InternalServerError().json(serde_json::json!({
-                            "error": "Failed to get system status"
-                        }))
-                    }
-                }
-            } else {
-                HttpResponse::Ok().json(serde_json::json!({
-                    "running": false,
-                    "message": "CCTV system is not running"
-                }))
-            }
-        }
-        Err(e) => {
-            log::error!("CCTV health check failed: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": "Health check failed"
-            }))
-        }
-    }
-}
-
-// Start CCTV system
-async fn cctv_start(session: Session, app_state: web::Data<AppState>) -> impl Responder {
-    let user = match session.get::<User>("user") {
         Ok(Some(user)) if user.role == "admin" => user,
         _ => return HttpResponse::Unauthorized().json(serde_json::json!({
-            "error": "Admin authentication required"
+            "error": "Admin access required"
         })),
     };
 
-    log::info!("User {} starting CCTV system", user.username);
+    use sysinfo::System;
     
-    let mut cctv_manager = app_state.cctv_manager.lock().unwrap();
+    let mut sys = System::new_all();
+    sys.refresh_all();
     
-    match cctv_manager.start_api_server().await {
-        Ok(_) => {
-            log::info!("CCTV system started successfully");
-            HttpResponse::Ok().json(serde_json::json!({
-                "success": true,
-                "message": "CCTV system started successfully"
-            }))
-        }
-        Err(e) => {
-            log::error!("Failed to start CCTV system: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": format!("Failed to start CCTV system: {}", e)
-            }))
-        }
-    }
+    // Get system uptime (in seconds) - using static method
+    let uptime = System::uptime();
+    
+    // Get current server time as ISO string
+    let server_time = chrono::Utc::now().to_rfc3339();
+    
+    // Get memory info
+    let total_memory = sys.total_memory();
+    let used_memory = sys.used_memory();
+    
+    // Get CPU usage (average across all cores)
+    let cpu_usage = sys.cpus().iter()
+        .map(|cpu| cpu.cpu_usage())
+        .fold(0.0, |acc, usage| acc + usage) / sys.cpus().len() as f32;
+
+    let result = serde_json::json!({
+        "uptime": uptime,
+        "server_time": server_time,
+        "memory": {
+            "used": used_memory,
+            "total": total_memory
+        },
+        "cpu_usage": cpu_usage
+    });
+
+    HttpResponse::Ok().json(result)
 }
 
-// Stop CCTV system
-async fn cctv_stop(session: Session, app_state: web::Data<AppState>) -> impl Responder {
-    let user = match session.get::<User>("user") {
-        Ok(Some(user)) if user.role == "admin" => user,
-        _ => return HttpResponse::Unauthorized().json(serde_json::json!({
-            "error": "Admin authentication required"
-        })),
-    };
+// Add this after the Permission struct and before the UploadForm struct
 
-    log::info!("User {} stopping CCTV system", user.username);
-    
-    let mut cctv_manager = app_state.cctv_manager.lock().unwrap();
-    
-    match cctv_manager.stop_api_server().await {
-        Ok(_) => {
-            log::info!("CCTV system stopped successfully");
-            HttpResponse::Ok().json(serde_json::json!({
-                "success": true,
-                "message": "CCTV system stopped successfully"
-            }))
-        }
-        Err(e) => {
-            log::error!("Failed to stop CCTV system: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": format!("Failed to stop CCTV system: {}", e)
-            }))
-        }
-    }
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct Camera {
+    pub id: i64,
+    pub name: String,
+    pub location: Option<String>,
+    pub ip_address: String,
+    pub port: i32,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub resolution: String,
+    pub fps: i32,
+    pub recording_enabled: bool,
+    pub motion_detection: bool,
+    pub is_online: bool,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
-// List cameras
-async fn cctv_cameras(session: Session, app_state: web::Data<AppState>) -> impl Responder {
-    let _user = match session.get::<User>("user") {
-        Ok(Some(user)) => user,
-        _ => return HttpResponse::Unauthorized().json(serde_json::json!({
-            "error": "Authentication required"
-        })),
-    };
-
-    let cctv_manager = app_state.cctv_manager.lock().unwrap();
-    
-    match cctv_manager.list_cameras().await {
-        Ok(cameras) => HttpResponse::Ok().json(cameras),
-        Err(e) => {
-            log::error!("Failed to list cameras: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": "Failed to list cameras"
-            }))
-        }
-    }
+#[derive(Deserialize)]
+struct AddCameraRequest {
+    camera_name: String,
+    location: Option<String>,
+    ip_address: String,
+    port: Option<i32>,
+    username: Option<String>,
+    password: Option<String>,
+    resolution: Option<String>,
+    fps: Option<i32>,
+    recording_enabled: Option<bool>,
+    motion_detection: Option<bool>,
 }
 
-// Proxy camera stream
-async fn cctv_stream(
-    path: web::Path<String>, 
-    session: Session, 
-    app_state: web::Data<AppState>
-) -> impl Responder {
-    let _user = match session.get::<User>("user") {
-        Ok(Some(user)) => user,
-        _ => return HttpResponse::Unauthorized().finish(),
-    };
-
-    let camera_id = path.into_inner();
-    let cctv_manager = app_state.cctv_manager.lock().unwrap();
-    
-    match cctv_manager.get_camera_stream_url(&camera_id).await {
-        Ok(stream_url) => {
-            // Proxy the stream (simplified - in production you might want more sophisticated streaming)
-            HttpResponse::Found()
-                .insert_header((header::LOCATION, stream_url))
-                .finish()
-        }
-        Err(e) => {
-            log::error!("Failed to get stream URL for camera {}: {}", camera_id, e);
-            HttpResponse::InternalServerError().finish()
-        }
-    }
+#[derive(Deserialize)]
+struct EditCameraRequest {
+    camera_id: i64,
+    camera_name: String,
+    location: Option<String>,
+    ip_address: String,
+    port: Option<i32>,
+    username: Option<String>,
+    password: Option<String>,
+    resolution: Option<String>,
+    fps: Option<i32>,
+    recording_enabled: Option<bool>,
+    motion_detection: Option<bool>,
 }
 
-// List recordings
-async fn cctv_recordings(session: Session, app_state: web::Data<AppState>) -> impl Responder {
-    let _user = match session.get::<User>("user") {
-        Ok(Some(user)) => user,
-        _ => return HttpResponse::Unauthorized().json(serde_json::json!({
-            "error": "Authentication required"
-        })),
-    };
-
-    let cctv_manager = app_state.cctv_manager.lock().unwrap();
-    
-    match cctv_manager.list_recordings().await {
-        Ok(recordings) => HttpResponse::Ok().json(recordings),
-        Err(e) => {
-            log::error!("Failed to list recordings: {}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": "Failed to list recordings"
-            }))
-        }
-    }
-}
-
-// Get specific recording
-async fn cctv_recording(
-    path: web::Path<String>, 
-    session: Session, 
-    app_state: web::Data<AppState>
-) -> impl Responder {
-    let _user = match session.get::<User>("user") {
-        Ok(Some(user)) => user,
-        _ => return HttpResponse::Unauthorized().finish(),
-    };
-
-    let filename = path.into_inner();
-    let cctv_manager = app_state.cctv_manager.lock().unwrap();
-    
-    match cctv_manager.get_recording_url(&filename).await {
-        Ok(recording_url) => {
-            // Proxy the recording download
-            HttpResponse::Found()
-                .insert_header((header::LOCATION, recording_url))
-                .finish()
-        }
-        Err(e) => {
-            log::error!("Failed to get recording URL for {}: {}", filename, e);
-            HttpResponse::NotFound().finish()
-        }
-    }
-}
-
-// CCTV Dashboard Handler
-async fn show_cctv_dashboard(session: Session, app_state: web::Data<AppState>) -> impl Responder {
-    let _user = match session.get::<User>("user") {
-        Ok(Some(user)) => user,
-        _ => return HttpResponse::Found().insert_header((header::LOCATION, "/login")).finish(),
-    };
-
-    let mut context = Context::new();
-    context.insert("current_page", "cctv");
-    
-    match app_state.tera.render("cctv_dashboard.html", &context) {
-        Ok(rendered) => HttpResponse::Ok().content_type("text/html").body(rendered),
-        Err(err) => {
-            log::error!("Template error: {}", err);
-            HttpResponse::InternalServerError().body("Template error")
-        }
-    }
+#[derive(Deserialize)]
+struct DeleteCameraRequest {
+    camera_id: i64,
 }
